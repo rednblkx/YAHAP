@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(hap_linux_example CXX)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Find dependencies
 find_package(OpenSSL REQUIRED)
 
