@@ -1,7 +1,6 @@
 #include "hap/transport/SecureSession.hpp"
 #include <cstring>
 #include <algorithm>
-#include <iostream>
 
 namespace hap::transport {
 
@@ -67,8 +66,6 @@ std::optional<std::vector<uint8_t>> SecureSession::decrypt_frame(std::span<const
     // Read length (little-endian)
     uint16_t length = read_buffer_[0] | (static_cast<uint16_t>(read_buffer_[1]) << 8);
 
-    std::cout << "Decrypted frame with length " << length << std::endl;
-    
     // Check if we have the full frame: 2 (length) + length (ciphertext) + 16 (auth tag)
     size_t frame_size = 2 + length + 16;
     if (read_buffer_.size() < frame_size) {
@@ -77,7 +74,6 @@ std::optional<std::vector<uint8_t>> SecureSession::decrypt_frame(std::span<const
     
     // Extract components
     std::array<uint8_t, 2> length_bytes = {read_buffer_[0], read_buffer_[1]};
-    std::cout << "length_bytes: " << std::hex << (int)length_bytes[0] << " " << (int)length_bytes[1] << std::endl;
     std::vector<uint8_t> ciphertext(read_buffer_.begin() + 2, read_buffer_.begin() + 2 + length);
     std::array<uint8_t, 16> auth_tag;
     std::copy_n(read_buffer_.begin() + 2 + length, 16, auth_tag.begin());
