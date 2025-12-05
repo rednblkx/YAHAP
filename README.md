@@ -1,4 +1,4 @@
-# Horizon HAP
+# YAHAP
 
 A modern C++20 implementation of the HomeKit Accessory Protocol (HAP) with a focus on modularity and platform independence.
 
