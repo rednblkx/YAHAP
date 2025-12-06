@@ -280,9 +280,8 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m5(const std::vector<core:
     auto list_data = config_.storage->get("pairing_list");
     nlohmann::json list_json;
     if (list_data) {
-        try {
-            list_json = nlohmann::json::parse(list_data->begin(), list_data->end());
-        } catch (...) {
+        list_json = nlohmann::json::parse(list_data->begin(), list_data->end(), nullptr, false);
+        if (list_json.is_discarded()) {
             list_json = nlohmann::json::array();
         }
     } else {
