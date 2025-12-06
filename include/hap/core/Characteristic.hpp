@@ -7,9 +7,28 @@
 #include <functional>
 #include <optional>
 #include <cstdint>
-#include <any>
 
 namespace hap::core {
+
+/**
+ * @brief Source of a characteristic event/write
+ */
+struct EventSource {
+    enum class Type {
+        None,
+        Connection      // Triggered by a HAP connection
+    };
+
+    Type type = Type::None;
+    uint32_t id = 0;    // Connection ID if type == Connection
+
+    static EventSource from_connection(uint32_t conn_id) {
+        EventSource source;
+        source.type = Type::Connection;
+        source.id = conn_id;
+        return source;
+    }
+};
 
 /**
  * @brief HAP Characteristic Formats
@@ -62,7 +81,7 @@ class Characteristic {
 public:
     using ReadCallback = std::function<Value()>;
     using WriteCallback = std::function<void(const Value&)>;
-    using EventCallback = std::function<void(const Value&, const std::any&)>;
+    using EventCallback = std::function<void(const Value&, const EventSource&)>;
 
     Characteristic(uint64_t type, Format format, std::vector<Permission> permissions)
         : type_(type), format_(format), permissions_(std::move(permissions)) {}
@@ -77,7 +96,7 @@ public:
     void set_iid(uint64_t iid) { iid_ = iid; }
 
     // Value access
-    void set_value(Value value, std::any source = {}) {
+    void set_value(Value value, EventSource source = {}) {
         value_ = std::move(value);
         if (write_callback_) write_callback_(value_);
         if (event_callback_) event_callback_(value_, source);
@@ -140,3 +159,4 @@ private:
 };
 
 } // namespace hap::core
+

@@ -65,10 +65,10 @@ void AccessoryServer::add_accessory(std::shared_ptr<core::Accessory> accessory) 
                 uint64_t aid = accessory->aid();
                 uint64_t iid = characteristic->iid();
                 
-                characteristic->set_event_callback([this, aid, iid](const core::Value& value, const std::any& source) {
+                characteristic->set_event_callback([this, aid, iid](const core::Value& value, const core::EventSource& source) {
                     uint32_t exclude_id = 0;
-                    if (source.has_value() && source.type() == typeid(uint32_t)) {
-                        exclude_id = std::any_cast<uint32_t>(source);
+                    if (source.type == core::EventSource::Type::Connection) {
+                        exclude_id = source.id;
                     }
                     broadcast_event(aid, iid, value, exclude_id);
                 });
