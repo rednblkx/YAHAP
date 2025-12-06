@@ -13,7 +13,7 @@ namespace hap::platform {
  */
 struct SRPSession {
     SRPSession(std::array<uint8_t, 16> salt, std::vector<uint8_t> verifier, std::string username, std::string password) : salt(std::move(salt)), verifier(std::move(verifier)), username(std::move(username)), password(std::move(password)) {}
-    ~SRPSession() = default;
+    virtual ~SRPSession() = default;
     std::array<uint8_t, 16> salt;
     std::vector<uint8_t> verifier;
     std::string username;
