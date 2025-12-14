@@ -43,6 +43,8 @@ target_sources(hap PRIVATE
     src/transport/AccessoryEndpoints.cpp
     src/pairing/PairSetup.cpp
     src/pairing/PairVerify.cpp
+    src/types/CharacteristicTypes.cpp
+    src/types/ServiceTypes.cpp
 )
 
 # Compiler warnings (High quality code)
