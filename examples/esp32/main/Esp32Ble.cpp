@@ -1,0 +1,391 @@
+#include "Esp32Ble.hpp"
+#include <esp_log.h>
+#include <esp_bt.h>
+#if CONFIG_IDF_TARGET_ESP32
+#include <esp_nimble_hci.h>
+#endif
+#include <nimble/nimble_port.h>
+#include <nimble/nimble_port_freertos.h>
+#include <services/gap/ble_svc_gap.h>
+#include <services/gatt/ble_svc_gatt.h>
+#include <cstring>
+#include <cstdlib>
+#include <optional>
+
+static const char* TAG = "Esp32Ble";
+
+// definition of static member
+std::vector<Esp32Ble::CharacteristicContext*> Esp32Ble::all_contexts;
+std::vector<Esp32Ble::DescriptorContext*> Esp32Ble::all_descriptor_contexts;
+static bool nimble_synced = false;
+static Esp32Ble* g_ble_instance = nullptr;
+static std::optional<Esp32Ble::Advertisement> pending_adv;
+static std::optional<Esp32Ble::Advertisement> last_adv;
+static uint32_t pending_adv_interval = 0;
+static uint32_t last_adv_interval = 20;
+
+static void parse_uuid(const std::string& uuid_str, ble_uuid_any_t* uuid) {
+    ESP_LOGI(TAG, "Parsing UUID: %s", uuid_str.c_str());
+    
+    std::string clean;
+    for (char c : uuid_str) {
+        if (c != '-') clean += c;
+    }
+    
+    if (clean.length() == 32) {
+        uuid->u.type = BLE_UUID_TYPE_128;
+        for (int i = 0; i < 16; i++) {
+            std::string byte_str = clean.substr((15 - i) * 2, 2);
+            uuid->u128.value[i] = (uint8_t)strtoul(byte_str.c_str(), nullptr, 16);
+        }
+    } else if (clean.length() == 4) {
+        uuid->u.type = BLE_UUID_TYPE_16;
+        uuid->u16.value = (uint16_t)strtoul(clean.c_str(), nullptr, 16);
+    } else {
+        ESP_LOGE(TAG, "Invalid UUID length: %d", (int)clean.length());
+    }
+}
+
+Esp32Ble::Esp32Ble() {
+}
+
+void Esp32Ble::init() {
+#if CONFIG_IDF_TARGET_ESP32
+    ESP_ERROR_CHECK(esp_nimble_hci_init());
+#endif
+    nimble_port_init();
+    
+    g_ble_instance = this;
+
+    ble_hs_cfg.sync_cb = [](){
+        ESP_LOGI(TAG, "NimBLE Synced");
+        nimble_synced = true;
+        if (pending_adv && g_ble_instance) {
+             g_ble_instance->start_advertising(*pending_adv, pending_adv_interval);
+             pending_adv.reset();
+        }
+    };
+    
+    ble_hs_cfg.gatts_register_cb = [](struct ble_gatt_register_ctxt *ctxt, void *arg){
+        char buf[BLE_UUID_STR_LEN];
+        switch (ctxt->op) {
+            case BLE_GATT_REGISTER_OP_SVC:
+                ESP_LOGI(TAG, "Reg Service: %s, handle=%d", ble_uuid_to_str(ctxt->svc.svc_def->uuid, buf), ctxt->svc.handle);
+                break;
+            case BLE_GATT_REGISTER_OP_CHR:
+                ESP_LOGI(TAG, "Reg Char: %s, val_handle=%d", ble_uuid_to_str(ctxt->chr.chr_def->uuid, buf), ctxt->chr.val_handle);
+                break;
+            case BLE_GATT_REGISTER_OP_DSC:
+                ESP_LOGI(TAG, "Reg Desc: %s, handle=%d", ble_uuid_to_str(ctxt->dsc.dsc_def->uuid, buf), ctxt->dsc.handle);
+                break;
+        }
+    };
+    ble_hs_cfg.reset_cb = [](int reason){
+        ESP_LOGI(TAG, "NimBLE Reset: %d", reason);
+    };
+    
+    ble_svc_gap_device_name_set("HAP Accessory");
+}
+
+void Esp32Ble::run() {
+    // Start task
+    nimble_port_freertos_init([](void* arg){
+        nimble_port_run();
+        nimble_port_freertos_deinit();
+    });
+}
+
+void Esp32Ble::start_advertising(const Advertisement& data, uint32_t interval_ms) {
+    if (!nimble_synced) {
+        ESP_LOGI(TAG, "Stack not synced, queueing advertisement");
+        pending_adv = data;
+        pending_adv_interval = interval_ms;
+        return;
+    }
+
+    struct ble_gap_adv_params adv_params;
+    struct ble_hs_adv_fields adv_fields;
+    struct ble_hs_adv_fields rsp_fields;
+    int rc;
+
+    memset(&adv_fields, 0, sizeof adv_fields);
+    memset(&rsp_fields, 0, sizeof rsp_fields);
+
+    adv_fields.flags = data.flags;
+    
+    std::vector<uint8_t> mfg_payload;
+    if (!data.manufacturer_data.empty() || data.company_id != 0) {
+        mfg_payload.reserve(2 + data.manufacturer_data.size());
+        mfg_payload.push_back(data.company_id & 0xFF);       // LE
+        mfg_payload.push_back((data.company_id >> 8) & 0xFF);
+        mfg_payload.insert(mfg_payload.end(), data.manufacturer_data.begin(), data.manufacturer_data.end());
+        
+        adv_fields.mfg_data = mfg_payload.data();
+        adv_fields.mfg_data_len = mfg_payload.size();
+    }
+    
+    if (data.local_name.has_value()) {
+        rsp_fields.name = (uint8_t*)data.local_name.value().c_str();
+        rsp_fields.name_len = data.local_name.value().size();
+        rsp_fields.name_is_complete = 1;
+    }
+
+    rc = ble_gap_adv_set_fields(&adv_fields);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "error setting adv fields; rc=%d", rc);
+        return;
+    }
+    
+    rc = ble_gap_adv_rsp_set_fields(&rsp_fields);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "error setting rsp fields; rc=%d", rc);
+        return;
+    }
+
+    memset(&adv_params, 0, sizeof adv_params);
+    adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
+    adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
+    adv_params.itvl_min = interval_ms * 1000 / 625;
+    adv_params.itvl_max = interval_ms * 1000 / 625;
+    
+    ble_gap_adv_stop();
+    
+    rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER, &adv_params, ble_gap_event, this);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "error enabling advertisement; rc=%d", rc);
+    } else {
+        ESP_LOGI(TAG, "Advertising started");
+        last_adv = data;
+        last_adv_interval = interval_ms;
+    }
+}
+
+void Esp32Ble::stop_advertising() {
+    ble_gap_adv_stop();
+}
+
+void Esp32Ble::disconnect(uint16_t connection_id) {
+    ble_gap_terminate(connection_id, BLE_ERR_REM_USER_CONN_TERM);
+}
+
+void Esp32Ble::set_disconnect_callback(DisconnectCallback callback) {
+    disconnect_callback_ = callback;
+}
+
+void Esp32Ble::send_notification(uint16_t connection_id, const std::string& characteristic_uuid, std::span<const uint8_t> data) {
+    uint16_t attr_handle = 0;
+    
+    for (auto* ctx : all_contexts) {
+        if (ctx->uuid == characteristic_uuid) {
+            attr_handle = ctx->val_handle;
+            break;
+        }
+    }
+    
+    if (attr_handle != 0) {
+        struct os_mbuf *om = ble_hs_mbuf_from_flat(data.data(), data.size());
+        ble_gatts_notify_custom(connection_id, attr_handle, om);
+    } else {
+        ESP_LOGW(TAG, "Characteristic %s not found for notification", characteristic_uuid.c_str());
+    }
+}
+
+int Esp32Ble::gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt *ctxt, void *arg) {
+    CharacteristicContext* ctx = static_cast<CharacteristicContext*>(arg);
+    if (!ctx) return BLE_ATT_ERR_UNLIKELY;
+
+     if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
+         ESP_LOGI(TAG, "GATT Read: %s", ctx->uuid.c_str());
+         if (ctx->on_read) {
+             auto data = ctx->on_read(conn_handle);
+             ESP_LOGI(TAG, "  -> Returning %d bytes", (int)data.size());
+             int rc = os_mbuf_append(ctxt->om, data.data(), data.size());
+             return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+         }
+     } else if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
+         if (ctx->on_write) {
+             std::vector<uint8_t> data;
+             data.resize(OS_MBUF_PKTLEN(ctxt->om));
+             int rc = os_mbuf_copydata(ctxt->om, 0, data.size(), data.data());
+             
+             ESP_LOGI(TAG, "GATT Write: %s, len=%d", ctx->uuid.c_str(), (int)data.size());
+             if (data.size() < 20) {
+                 ESP_LOG_BUFFER_HEX(TAG, data.data(), data.size());
+             }
+             
+             if (rc == 0) {
+                 ctx->on_write(conn_handle, data, false);
+                 return 0;
+             }
+         }
+     }
+     
+     return 0;
+}
+
+int Esp32Ble::gatt_svr_dsc_access(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt *ctxt, void *arg) {
+    DescriptorContext* ctx = static_cast<DescriptorContext*>(arg);
+    if (!ctx) return BLE_ATT_ERR_UNLIKELY;
+
+    if (ctxt->op == BLE_GATT_ACCESS_OP_READ_DSC) {
+        ESP_LOGI(TAG, "GATT Desc Read: %s", ctx->uuid.c_str());
+        if (ctx->on_read) {
+            auto data = ctx->on_read(conn_handle);
+            int rc = os_mbuf_append(ctxt->om, data.data(), data.size());
+            return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+        }
+    } else if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_DSC) {
+        if (ctx->on_write) {
+             std::vector<uint8_t> data;
+             data.resize(OS_MBUF_PKTLEN(ctxt->om));
+             int rc = os_mbuf_copydata(ctxt->om, 0, data.size(), data.data());
+             if (rc == 0) {
+                 ctx->on_write(conn_handle, data);
+                 return 0;
+             }
+        }
+    }
+    return 0;
+}
+
+void Esp32Ble::register_service(const ServiceDefinition& service) {
+    printf("DEBUG: register_service called for UUID: %s\n", service.uuid.c_str());
+    auto svcs = new struct ble_gatt_svc_def[2];
+    memset(svcs, 0, sizeof(struct ble_gatt_svc_def) * 2);
+
+    auto& svc_def = svcs[0];
+    svc_def.type = BLE_GATT_SVC_TYPE_PRIMARY;
+    
+    auto uuid_svc = new ble_uuid_any_t;
+    parse_uuid(service.uuid, uuid_svc);
+    svc_def.uuid = &uuid_svc->u;
+    
+    size_t char_count = service.characteristics.size();
+    auto chars_def = new struct ble_gatt_chr_def[char_count + 1];
+    memset(chars_def, 0, sizeof(struct ble_gatt_chr_def) * (char_count + 1));
+    
+    for (size_t i=0; i<char_count; ++i) {
+        const auto& c = service.characteristics[i];
+        
+        auto ctx = new CharacteristicContext();
+        ctx->uuid = c.uuid;
+        ctx->on_read = c.on_read;
+        ctx->on_write = c.on_write;
+        ctx->on_subscribe = c.on_subscribe;
+        
+        auto uuid_chr = new ble_uuid_any_t;
+        parse_uuid(c.uuid, uuid_chr);
+        chars_def[i].uuid = &uuid_chr->u;
+        
+        chars_def[i].flags = 0;
+        if (c.properties.read) chars_def[i].flags |= BLE_GATT_CHR_F_READ;
+        if (c.properties.write) chars_def[i].flags |= BLE_GATT_CHR_F_WRITE;
+        if (c.properties.write_without_response) chars_def[i].flags |= BLE_GATT_CHR_F_WRITE_NO_RSP;
+        if (c.properties.notify) chars_def[i].flags |= BLE_GATT_CHR_F_NOTIFY;
+        if (c.properties.indicate) chars_def[i].flags |= BLE_GATT_CHR_F_INDICATE;
+        
+        chars_def[i].access_cb = gatt_svr_chr_access;
+        chars_def[i].arg = ctx;
+        
+        chars_def[i].val_handle = &ctx->val_handle;
+        
+        all_contexts.push_back(ctx);
+
+        size_t desc_count = c.descriptors.size();
+        if (desc_count > 0) {
+            auto descs_def = new struct ble_gatt_dsc_def[desc_count + 1];
+            memset(descs_def, 0, sizeof(struct ble_gatt_dsc_def) * (desc_count + 1));
+            
+            for (size_t j=0; j<desc_count; ++j) {
+                const auto& d = c.descriptors[j];
+                auto d_ctx = new DescriptorContext();
+                d_ctx->uuid = d.uuid;
+                d_ctx->on_read = d.on_read;
+                d_ctx->on_write = d.on_write;
+                
+                auto uuid_dsc = new ble_uuid_any_t;
+                parse_uuid(d.uuid, uuid_dsc);
+                descs_def[j].uuid = &uuid_dsc->u;
+                
+                descs_def[j].att_flags = 0;
+                if (d.properties.read) descs_def[j].att_flags |= BLE_ATT_F_READ;
+                if (d.properties.write) descs_def[j].att_flags |= BLE_ATT_F_WRITE; 
+                
+                descs_def[j].access_cb = gatt_svr_dsc_access;
+                descs_def[j].arg = d_ctx;
+                
+                all_descriptor_contexts.push_back(d_ctx);
+            }
+            chars_def[i].descriptors = descs_def;
+        }
+    }
+    
+    svc_def.characteristics = chars_def;
+    
+    nim_services.push_back(svcs);
+    
+    int rc = ble_gatts_count_cfg(svcs);
+    if (rc != 0) printf("ERROR: ble_gatts_count_cfg failed: %d\n", rc);
+    
+    rc = ble_gatts_add_svcs(svcs);
+    if (rc != 0) {
+        printf("ERROR: ble_gatts_add_svcs failed: %d\n", rc);
+    } else {
+        printf("DEBUG: ble_gatts_add_svcs success\n");
+    }
+}
+
+int Esp32Ble::ble_gap_event(struct ble_gap_event *event, void *arg) {
+    (void)arg;
+    
+    ESP_LOGI(TAG, "BLE GAP Event: type=%d", event->type);
+    
+    switch (event->type) {
+        case BLE_GAP_EVENT_CONNECT:
+            ESP_LOGI(TAG, "Connected");
+            break;
+        case BLE_GAP_EVENT_DISCONNECT:
+            ESP_LOGI(TAG, "Disconnected, reason=0x%x", event->disconnect.reason);
+            {
+                auto self = static_cast<Esp32Ble*>(arg);
+                if (self && self->disconnect_callback_) {
+                    self->disconnect_callback_(event->disconnect.conn.conn_handle);
+                }
+                if (self && last_adv) {
+                    ESP_LOGI(TAG, "Restarting advertising after disconnect");
+                    self->start_advertising(*last_adv, last_adv_interval);
+                }
+            }
+            break;
+        case BLE_GAP_EVENT_SUBSCRIBE:
+            ESP_LOGI(TAG, "Subscribe: conn=%d attr=%d reason=%d", event->subscribe.conn_handle, event->subscribe.attr_handle, event->subscribe.reason);
+            for (auto* ctx : all_contexts) {
+                 if (ctx->val_handle == event->subscribe.attr_handle) {
+                     if (ctx->on_subscribe) {
+                         ctx->on_subscribe(event->subscribe.conn_handle, event->subscribe.cur_notify > 0);
+                     }
+                     break;
+                 }
+            }
+            break;
+        case BLE_GAP_EVENT_MTU:
+            ESP_LOGI(TAG, "MTU Update: conn=%d mtu=%d", event->mtu.conn_handle, event->mtu.value);
+            break;
+        case BLE_GAP_EVENT_CONN_UPDATE:
+            ESP_LOGI(TAG, "Connection Update: conn=%d", event->conn_update.conn_handle);
+            break;
+        case BLE_GAP_EVENT_ENC_CHANGE:
+            ESP_LOGI(TAG, "Encryption Change: conn=%d status=%d", event->enc_change.conn_handle, event->enc_change.status);
+            break;
+        case BLE_GAP_EVENT_PASSKEY_ACTION:
+            ESP_LOGI(TAG, "Passkey Action: conn=%d action=%d", event->passkey.conn_handle, event->passkey.params.action);
+            return BLE_HS_ENOTSUP;
+        case BLE_GAP_EVENT_REPEAT_PAIRING:
+            ESP_LOGI(TAG, "Repeat Pairing: conn=%d", event->repeat_pairing.conn_handle);
+            return BLE_GAP_REPEAT_PAIRING_IGNORE;
+        default:
+            ESP_LOGI(TAG, "Unhandled GAP event: %d", event->type);
+            break;
+    }
+    return 0;
+}
