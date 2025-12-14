@@ -52,9 +52,16 @@ Response PairingEndpoints::handle_pair_verify(const Request& req, ConnectionCont
         "[PairingEndpoints] /pair-verify request from connection #" + std::to_string(ctx.connection_id()) + 
         ", body size: " + std::to_string(req.body.size()));
     
+    // Parse request to check what state we're handling
+    auto tlvs = core::TLV8::parse(req.body);
+    auto state_val = core::TLV8::find_uint8(tlvs, static_cast<uint8_t>(pairing::TLVType::State));
+    bool is_m1 = state_val && *state_val == static_cast<uint8_t>(pairing::PairingState::M1);
+    
     // Get or create session
+    // For BLE: always create a new session on M1 to handle reconnection properly
+    // (BLE reconnects with same connection_id=0, so old verified session would be reused)
     auto& session = pair_verify_sessions_[ctx.connection_id()];
-    if (!session) {
+    if (!session || is_m1) {
         config_.system->log(platform::System::LogLevel::Info, 
             "[PairingEndpoints] Creating new pair-verify session");
         pairing::PairVerify::Config verify_config;

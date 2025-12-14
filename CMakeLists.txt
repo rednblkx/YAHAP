@@ -36,6 +36,8 @@ target_sources(hap PRIVATE
     src/transport/HTTP.cpp
     src/transport/SecureSession.cpp
     src/transport/Router.cpp
+    src/platform/Ble.cpp
+    src/transport/BleTransport.cpp
     src/transport/ConnectionContext.cpp
     src/transport/PairingEndpoints.cpp
     src/transport/AccessoryEndpoints.cpp

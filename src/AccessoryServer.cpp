@@ -1,5 +1,6 @@
 #include "hap/AccessoryServer.hpp"
 #include "hap/transport/Router.hpp"
+#include "hap/transport/BleTransport.hpp"
 #include "hap/transport/ConnectionContext.hpp"
 #include "hap/transport/PairingEndpoints.hpp"
 #include "hap/transport/AccessoryEndpoints.hpp"
@@ -16,6 +17,7 @@ class AccessoryServer::Impl {
 public:
     std::unique_ptr<transport::Router> router;
     std::unique_ptr<transport::PairingEndpoints> pairing_endpoints;
+    std::unique_ptr<transport::BleTransport> ble_transport;
     std::unique_ptr<transport::AccessoryEndpoints> accessory_endpoints;
     std::map<uint32_t, std::unique_ptr<transport::ConnectionContext>> connections;
     std::map<uint32_t, transport::HTTPParser> parsers;
@@ -30,10 +32,26 @@ AccessoryServer::AccessoryServer(Config config) : config_(std::move(config)), im
     pairing_config.accessory_id = config_.accessory_id;
     pairing_config.setup_code = config_.setup_code;
     pairing_config.on_pairings_changed = [this]() {
-        config_.system->log(platform::System::LogLevel::Info, "[AccessoryServer] Pairings changed, updating mDNS");
+        config_.system->log(platform::System::LogLevel::Info, "[AccessoryServer] Pairings changed, updating mDNS and BLE advertising");
         update_mdns();
+        if (impl_->ble_transport) {
+            impl_->ble_transport->update_advertising();
+        }
     };
     impl_->pairing_endpoints = std::make_unique<transport::PairingEndpoints>(pairing_config);
+    
+    if (config_.ble) {
+        transport::BleTransport::Config ble_config;
+        ble_config.ble = config_.ble;
+        ble_config.crypto = config_.crypto;
+        ble_config.database = &database_;
+        ble_config.pairing_endpoints = impl_->pairing_endpoints.get();
+        ble_config.system = config_.system;
+        ble_config.storage = config_.storage;
+        ble_config.accessory_id = config_.accessory_id;
+        ble_config.device_name = config_.device_name;
+        impl_->ble_transport = std::make_unique<transport::BleTransport>(ble_config);
+    }
     
     impl_->accessory_endpoints = std::make_unique<transport::AccessoryEndpoints>(&database_);
     
@@ -140,13 +158,20 @@ void AccessoryServer::start() {
         on_tcp_disconnect(conn_id);
     };
     
-    config_.network->tcp_listen(config_.port, receive_cb, disconnect_cb);
+    if (config_.network) {
+        config_.network->tcp_listen(config_.port, receive_cb, disconnect_cb);
+        
+        // Register mDNS service
+        update_mdns();
+    }
     
-    // Register mDNS service
-    update_mdns();
+    if (impl_->ble_transport) {
+        impl_->ble_transport->start();
+    }
 }
 
 void AccessoryServer::update_mdns() {
+    if (!config_.network) return;
     platform::Network::MdnsService mdns_service;
     mdns_service.name = config_.device_name;
     mdns_service.type = "_hap._tcp";
@@ -195,6 +220,11 @@ void AccessoryServer::update_mdns() {
 
 void AccessoryServer::stop() {
     config_.system->log(platform::System::LogLevel::Info, "HAP Server stopping...");
+    
+    if (impl_->ble_transport) {
+        impl_->ble_transport->stop();
+    }
+    
     impl_->connections.clear();
     impl_->parsers.clear();
 }

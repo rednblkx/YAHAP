@@ -96,4 +96,49 @@ std::optional<std::vector<uint8_t>> SecureSession::decrypt_frame(std::span<const
     return plaintext;
 }
 
+// ===== BLE-specific methods (HAP Spec 7.4.7.2/7.4.7.5) =====
+
+std::vector<uint8_t> SecureSession::encrypt_ble_pdu(std::span<const uint8_t> plaintext) {
+    auto nonce = build_nonce(write_nonce_++);
+    std::vector<uint8_t> ciphertext(plaintext.size());
+    std::array<uint8_t, 16> auth_tag;
+    
+    std::span<const uint8_t> empty_aad;
+    
+    if (!crypto_->chacha20_poly1305_encrypt_and_tag(
+            a2c_, nonce, empty_aad, 
+            plaintext, ciphertext, auth_tag)) {
+        return {};
+    }
+    
+    ciphertext.insert(ciphertext.end(), auth_tag.begin(), auth_tag.end());
+    return ciphertext;
+}
+
+std::optional<std::vector<uint8_t>> SecureSession::decrypt_ble_pdu(std::span<const uint8_t> encrypted_data) {
+    constexpr size_t AUTH_TAG_SIZE = 16;
+    
+    if (encrypted_data.size() < AUTH_TAG_SIZE) {
+        return std::nullopt;
+    }
+    
+    size_t ciphertext_len = encrypted_data.size() - AUTH_TAG_SIZE;
+    
+    std::span<const uint8_t> ciphertext = encrypted_data.subspan(0, ciphertext_len);
+    std::array<uint8_t, 16> auth_tag;
+    std::copy_n(encrypted_data.data() + ciphertext_len, AUTH_TAG_SIZE, auth_tag.begin());
+    
+    auto nonce = build_nonce(read_nonce_++);
+    std::vector<uint8_t> plaintext(ciphertext_len);
+    std::span<const uint8_t> empty_aad;
+    
+    if (!crypto_->chacha20_poly1305_decrypt_and_verify(
+            c2a_, nonce, empty_aad,
+            ciphertext, auth_tag, plaintext)) {
+        return std::nullopt;
+    }
+    
+    return plaintext;
+}
+
 } // namespace hap::transport

@@ -9,7 +9,7 @@
 namespace hap::transport {
 
 /**
- * @brief Secure Session Wrapper for HTTP Transport (HAP Spec 6.5.2)
+ * @brief Secure Session for Transport (HAP Spec 6.5.2)
  * 
  * Encrypts/decrypts HTTP frames using ChaCha20-Poly1305 AEAD.
  * Frame format: <2-byte length><encrypted data><16-byte auth tag>
@@ -39,19 +39,33 @@ public:
      */
     void reset();
 
+    // ===== BLE-specific methods (HAP Spec 7.4.7.2) =====
+    // BLE PDU format: <encrypted PDU><16-byte authTag> (no length prefix, no AAD)
+    
+    /**
+     * @brief Encrypt a BLE HAP PDU before sending.
+     * @param plaintext Raw HAP-BLE PDU bytes
+     * @return Encrypted data: <ciphertext><16-byte authTag>
+     */
+    std::vector<uint8_t> encrypt_ble_pdu(std::span<const uint8_t> plaintext);
+
+    /**
+     * @brief Decrypt a received BLE HAP PDU.
+     * @param encrypted_data Raw GATT data: <ciphertext><16-byte authTag>
+     * @return Decrypted PDU, or nullopt if auth fails
+     */
+    std::optional<std::vector<uint8_t>> decrypt_ble_pdu(std::span<const uint8_t> encrypted_data);
+
 private:
     platform::Crypto* crypto_;
     std::array<uint8_t, 32> a2c_;
     std::array<uint8_t, 32> c2a_;
     
-    // Nonces (separate for read/write)
     uint64_t write_nonce_;
     uint64_t read_nonce_;
     
-    // Buffer for partial frames
     std::vector<uint8_t> read_buffer_;
     
-    // Build 96-bit nonce from counter
     std::array<uint8_t, 12> build_nonce(uint64_t counter);
 };
 
