@@ -414,12 +414,20 @@ void BleTransport::update_advertising() {
         config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Initialized GSN to 1");
     }
 
+    // Get Configuration Number from storage (dynamically updated by AccessoryServer)
+    uint16_t config_number = 1;
+    auto cn_bytes = config_.storage->get("config_number");
+    if (cn_bytes && !cn_bytes->empty()) {
+        std::string cn_str(cn_bytes->begin(), cn_bytes->end());
+        config_number = static_cast<uint16_t>(std::stoi(cn_str));
+    }
+
     auto adv = platform::Ble::Advertisement::create_hap(
         status_flags,
         device_id,
         config_.category_id,
         gsn,
-        config_.config_number,
+        config_number,
         setup_hash
     );
     
@@ -437,7 +445,7 @@ void BleTransport::update_advertising() {
         "[BleTransport] SF=" + std::to_string(status_flags) + 
         " ACID=" + std::to_string(config_.category_id) +
         " GSN=" + std::to_string(gsn) +
-        " CN=" + std::to_string(config_.config_number));
+        " CN=" + std::to_string(config_number));
 
     config_.ble->start_advertising(adv);
 }
@@ -997,6 +1005,12 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                      ch->set_value(new_value);
                      config_.system->log(platform::System::LogLevel::Info, 
                          "[BleTransport] Write IID=" + std::to_string(iid) + " success");
+                     
+                     // Per HAP Spec 7.4.1.8: GSN increments on first characteristic change per connection
+                     if (!state.gsn_incremented) {
+                         state.gsn_incremented = true;
+                         increment_gsn();
+                     }
                  } else {
                      config_.system->log(platform::System::LogLevel::Warning, 
                          "[BleTransport] Write IID=" + std::to_string(iid) + " - no value TLV found");

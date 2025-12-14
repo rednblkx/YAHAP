@@ -93,6 +93,7 @@ private:
         uint64_t connection_established_ms = 0; // Timestamp when connection established (for initial 10s timeout)
         uint64_t last_write_ms = 0; // Timestamp of last write (for GATT read validation)
         uint16_t expected_body_length = 0; // Expected body length from PDU header (for fragmentation)
+        bool gsn_incremented = false; // Per spec: GSN increments only once per connection
     };
     std::map<uint16_t, TransactionState> transactions_;
 

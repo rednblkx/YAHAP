@@ -75,6 +75,7 @@ private:
     void on_tcp_receive(uint32_t connection_id, std::span<const uint8_t> data);
     void on_tcp_disconnect(uint32_t connection_id);
     void update_mdns();
+    void check_and_update_config_number();
 };
 
 } // namespace hap

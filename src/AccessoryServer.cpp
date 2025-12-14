@@ -149,6 +149,9 @@ void AccessoryServer::setup_routes() {
 void AccessoryServer::start() {
     config_.system->log(platform::System::LogLevel::Info, "HAP Server starting...");
     
+    // Check if database structure changed and increment CN if needed
+    check_and_update_config_number();
+    
     // Start TCP listener
     auto receive_cb = [this](uint32_t conn_id, std::span<const uint8_t> data) {
         on_tcp_receive(conn_id, data);
@@ -428,6 +431,59 @@ void AccessoryServer::broadcast_event(uint64_t aid, uint64_t iid, const core::Va
                 offset += chunk_size;
             }
         }
+    }
+}
+
+void AccessoryServer::check_and_update_config_number() {
+    std::ostringstream hash_input;
+    
+    for (const auto& acc : database_.accessories()) {
+        hash_input << "A" << acc->aid() << ":";
+        for (const auto& svc : acc->services()) {
+            hash_input << "S" << std::hex << svc->type() << ":";
+            for (const auto& ch : svc->characteristics()) {
+                hash_input << "C" << std::hex << ch->type() << ",";
+            }
+        }
+    }
+    
+    std::string current_hash_input = hash_input.str();
+    
+    uint32_t hash = 5381;
+    for (char c : current_hash_input) {
+        hash = ((hash << 5) + hash) + static_cast<uint8_t>(c);
+    }
+    
+    std::string current_hash = std::to_string(hash);
+    
+    auto stored_hash_data = config_.storage->get("db_hash");
+    std::string stored_hash;
+    if (stored_hash_data && !stored_hash_data->empty()) {
+        stored_hash = std::string(stored_hash_data->begin(), stored_hash_data->end());
+    }
+    
+    if (stored_hash != current_hash) {
+        config_.system->log(platform::System::LogLevel::Info, 
+            "[AccessoryServer] Database structure changed, incrementing Configuration Number");
+        
+        auto cn_data = config_.storage->get("config_number");
+        uint16_t cn = 0;
+        if (cn_data && !cn_data->empty()) {
+            cn = static_cast<uint16_t>(std::stoi(std::string(cn_data->begin(), cn_data->end())));
+        }
+        
+        cn = (cn >= 65535) ? 1 : cn + 1;
+        
+        std::string cn_str = std::to_string(cn);
+        config_.storage->set("config_number", std::vector<uint8_t>(cn_str.begin(), cn_str.end()));
+        
+        config_.storage->set("db_hash", std::vector<uint8_t>(current_hash.begin(), current_hash.end()));
+        
+        config_.system->log(platform::System::LogLevel::Info, 
+            "[AccessoryServer] Configuration Number updated to: " + cn_str);
+    } else {
+        config_.system->log(platform::System::LogLevel::Debug, 
+            "[AccessoryServer] Database structure unchanged, CN remains the same");
     }
 }
 
