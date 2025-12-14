@@ -103,7 +103,9 @@ void BleTransport::start() {
         }
         
         config_.system->log(platform::System::LogLevel::Info, 
-            "[BleTransport] Connection state cleaned up, advertising will restart automatically");
+            "[BleTransport] Connection state cleaned up, refreshing advertising");
+        
+        update_advertising();
     });
 
     register_accessory_info_service();
@@ -357,10 +359,11 @@ void BleTransport::setup_protocol_info_service() {
 void BleTransport::update_advertising() {
     config_.system->log(platform::System::LogLevel::Info, "[BleTransport] update_advertising entry");
     
-    auto setup_id_bytes = config_.storage->get("setupID");
+    auto setup_id_bytes = config_.storage->get("setup_id");
     std::string setup_id;
     if (setup_id_bytes && setup_id_bytes->size() == 4) {
         setup_id = std::string(setup_id_bytes->begin(), setup_id_bytes->end());
+        config_.system->log(platform::System::LogLevel::Debug, "[BleTransport] Using existing Setup ID: " + setup_id);
     } else {
         const char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
         std::mt19937 rng(std::random_device{}());
@@ -762,15 +765,11 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
             // Service Properties (TLV Type 0x0F - HAPBLEPDUTLVType::ServiceProperties)
             // Bit 0: Primary Service
             // Bit 1: Hidden Service
-            // Bit 2: Supports HAP Protocol Configuration (required for Protocol Info Service)
+            // Bit 2: Supports HAP Protocol Configuration (only for Protocol Info Service 0xA2)
             uint16_t props = 0;
             
             if (is_primary) {
-                 // For now, if it's a special HAP service (which have is_primary=true), force 0x0004 only.
-                 // Ideally we'd valid check IID, but let's trust this heuristic for the HAP services.
-                 props = 0x0004; 
-            } else {
-                 if (is_primary) props |= 0x0001;
+                props |= 0x0001;  // Bit 0: Primary Service
             }
             
             // TLV: Type=0x0F, Len=2, Value=Integer
@@ -1024,10 +1023,92 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         send_response(connection_id, state.transaction_id, state.target_uuid, status, response_body);
     }
     else if (opcode == PDUOpcode::CharacteristicTimedWrite) { // 0x04
-        if (body.size() >= 1) {
-             state.ttl = body[0];
-             send_response(connection_id, state.transaction_id, state.target_uuid, 0x00, {});
+        state.timed_write_body.assign(body.begin(), body.end());
+        state.timed_write_iid = iid;
+        state.target_uuid = state.target_uuid; // Keep for ExecuteWrite
+        
+        config_.system->log(platform::System::LogLevel::Info,
+            "[BleTransport] Timed Write stored for IID=" + std::to_string(iid) + 
+            " Body size=" + std::to_string(body.size()));
+        
+        send_response(connection_id, state.transaction_id, state.target_uuid, 0x00, {});
+    }
+    else if (opcode == PDUOpcode::CharacteristicExecuteWrite) { // 0x05
+        uint8_t status = 0x00;
+        std::vector<uint8_t> response_body;
+        
+        if (state.timed_write_body.empty()) {
+            config_.system->log(platform::System::LogLevel::Warning,
+                "[BleTransport] Execute Write with no pending timed write");
+            status = 0x06; // Invalid Request
+        } else {
+            config_.system->log(platform::System::LogLevel::Info,
+                "[BleTransport] Executing pending timed write for IID=" + std::to_string(state.timed_write_iid));
+            
+            auto meta_it = pairing_char_metadata_.find(state.timed_write_iid);
+            if (meta_it != pairing_char_metadata_.end()) {
+                uint8_t type = meta_it->second.char_type;
+                
+                if (!connections_.contains(connection_id)) {
+                    connections_[connection_id] = std::make_unique<ConnectionContext>(config_.crypto, config_.system, connection_id);
+                }
+                auto& ctx = *connections_[connection_id];
+                
+                std::vector<uint8_t> inner_body;
+                bool return_response_requested = false;
+                
+                // Parse BLE TLVs for Pairing characteristics
+                if (type == 0x4C || type == 0x4E || type == 0x50) {
+                    auto ble_tlvs = core::TLV8::parse(state.timed_write_body);
+                    
+                    if (core::TLV8::find(ble_tlvs, (uint8_t)HAPBLEPDUTLVType::ReturnResponse)) {
+                        return_response_requested = true;
+                    }
+                    
+                    auto val = core::TLV8::find(ble_tlvs, 0x01);
+                    if (val) {
+                        inner_body.assign(val->begin(), val->end());
+                    } else {
+                        inner_body = state.timed_write_body;
+                    }
+                } else {
+                    inner_body = state.timed_write_body;
+                }
+                
+                Request req;
+                req.body = std::move(inner_body);
+                req.method = Method::POST;
+                
+                Response resp;
+                if (type == 0x4C) {
+                    req.path = "/pair-setup";
+                    resp = config_.pairing_endpoints->handle_pair_setup(req, ctx);
+                } else if (type == 0x4E) {
+                    req.path = "/pair-verify";
+                    resp = config_.pairing_endpoints->handle_pair_verify(req, ctx);
+                } else if (type == 0x50) {
+                    req.path = "/pairings";
+                    resp = config_.pairing_endpoints->handle_pairings(req, ctx);
+                }
+                
+                status = (resp.status == Status::OK) ? 0x00 : 0x02;
+                
+                if (return_response_requested && !resp.body.empty()) {
+                    std::vector<core::TLV> resp_tlvs;
+                    resp_tlvs.emplace_back(0x01, resp.body);
+                    response_body = core::TLV8::encode(resp_tlvs);
+                } else {
+                    response_body = resp.body;
+                }
+            } else {
+                status = 0x06;
+            }
+            
+            state.timed_write_body.clear();
+            state.timed_write_iid = 0;
         }
+        
+        send_response(connection_id, state.transaction_id, state.target_uuid, status, response_body);
     }
     else if (opcode == PDUOpcode::CharacteristicConfiguration) { // 0x07
         // HAP-Characteristic-Configuration-Request/Response

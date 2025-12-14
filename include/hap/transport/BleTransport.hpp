@@ -94,6 +94,8 @@ private:
         uint64_t last_write_ms = 0; // Timestamp of last write (for GATT read validation)
         uint16_t expected_body_length = 0; // Expected body length from PDU header (for fragmentation)
         bool gsn_incremented = false; // Per spec: GSN increments only once per connection
+        std::vector<uint8_t> timed_write_body; // Body data pending for ExecuteWrite
+        uint16_t timed_write_iid = 0; // IID for pending timed write
     };
     std::map<uint16_t, TransactionState> transactions_;
 
