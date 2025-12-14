@@ -1,110 +1,137 @@
-# YAHAP
+# YAHAP (Yet Another HAP)
 
-A modern C++20 implementation of the HomeKit Accessory Protocol (HAP) with a focus on modularity and platform independence.
+A modern C++20 implementation of the HomeKit Accessory Protocol (HAP) with a focus on modularity and platform independence. Supports both **HAP over IP** and **HAP over BLE** transports.
 
-## Overview
+## Features
 
-This library provides a clean, modular architecture for implementing HAP accessories. All platform-specific functionality is abstracted through provider interfaces, allowing you to integrate this library into any platform (ESP-IDF, Linux, embedded RTOS, etc.) by implementing the required providers.
+- **Dual Transport Support**: Full implementation of both HAP over IP (TCP/HTTP) and HAP over BLE
+- **Complete Pairing Protocol**: SRP-6a based Pair-Setup and Pair-Verify as per HAP Specification R13
+- **Secure Sessions**: ChaCha20-Poly1305 encrypted communication with session key derivation
+- **Platform Agnostic**: Clean abstraction layer allows porting to any platform
+- **Modern C++20**: Uses `std::span`, concepts, and modern language features
+- **No Exceptions/RTTI Required**: Works on embedded platforms with limited C++ runtime
 
 ## Architecture
 
-The library is structured around:
-
-- **Core HAP Logic**: Implements the HAP object model (Accessories, Services, Characteristics)
-- **Platform Abstraction Layer (PAL)**: Abstract interfaces for platform-specific functionality
-- **Transport Layer**: Protocol logic for HAP over IP and BLE
-
-### Platform Provider Interfaces
-
-To use this library, you must implement the following interfaces:
-
-- `hap::platform::Crypto` - Cryptographic primitives (SHA-512, Ed25519, ChaCha20-Poly1305, etc.)
-- `hap::platform::Network` - TCP/IP networking and mDNS
-- `hap::platform::Storage` - Persistent key-value storage
-- `hap::platform::System` - System utilities (time, logging, RNG)
-- `hap::platform::Ble` - Bluetooth Low Energy (optional, only needed for BLE accessories)
-
-## Usage
-
-### 1. Include as a Component
-
-For ESP-IDF projects, copy this directory into your `components` folder:
-
 ```
-my-esp-project/
-├── components/
-│   └── horizon-hap/   # This library
-├── main/
-│   └── main.cpp       # Your application
-└── CMakeLists.txt
+┌─────────────────────────────────────────────────────────┐
+│                   Application Layer                     │
+│   (Your accessory logic: Lightbulb, Sensor, etc.)       │
+└─────────────────────────┬───────────────────────────────┘
+                          │
+┌─────────────────────────▼───────────────────────────────┐
+│                   HAP Library Core                      │
+│  ┌─────────────┐  ┌──────────────┐  ┌────────────────┐  │
+│  │ Accessory   │  │  Pairing     │  │  Transport     │  │
+│  │ Server      │  │  PairSetup   │  │  HTTP/BLE      │  │
+│  │             │  │  PairVerify  │  │  SecureSession │  │
+│  └─────────────┘  └──────────────┘  └────────────────┘  │
+└─────────────────────────┬───────────────────────────────┘
+                          │
+┌─────────────────────────▼───────────────────────────────┐
+│              Platform Abstraction Layer (PAL)           │
+│  ┌────────┐ ┌─────────┐ ┌─────────┐ ┌────────┐ ┌─────┐  │
+│  │ Crypto │ │ Network │ │ Storage │ │ System │ │ BLE │  │
+│  └────────┘ └─────────┘ └─────────┘ └────────┘ └─────┘  │
+└─────────────────────────────────────────────────────────┘
 ```
 
-### 2. Implement Platform Providers
+### Core Components
 
-Create concrete implementations of the provider interfaces for your platform:
+| Component | Description |
+|-----------|-------------|
+| `AccessoryServer` | Main server orchestrating HAP protocol, manages accessories and connections |
+| `AttributeDatabase` | HAP object model (Accessories, Services, Characteristics) with JSON serialization |
+| `PairSetup` | SRP-6a based iOS pairing handshake (M1-M6 exchange) |
+| `PairVerify` | Ed25519/X25519 session establishment for paired devices |
+| `SecureSession` | ChaCha20-Poly1305 encrypted frame handling |
+| `BleTransport` | HAP-BLE PDU fragmentation, GATT services, and advertising |
 
-```cpp
-// In your platform code
-class EspCrypto : public hap::platform::Crypto {
-    // Implement all virtual methods using mbedtls or ESP crypto APIs
-};
+### Platform Interfaces
 
-class EspNetwork : public hap::platform::Network {
-    // Implement using ESP-IDF networking stack
-};
+To port this library, implement these abstract interfaces:
 
-// ... and so on
+| Interface | Purpose |
+|-----------|---------|
+| `hap::platform::Crypto` | SHA-512, HKDF, Ed25519, X25519, ChaCha20-Poly1305 |
+| `hap::platform::CryptoSRP` | SRP-6a verifier generation and client proof verification |
+| `hap::platform::Network` | TCP server, mDNS registration (HAP over IP only) |
+| `hap::platform::Storage` | Persistent key-value storage for pairing data |
+| `hap::platform::System` | Logging, timestamps, random number generation |
+| `hap::platform::Ble` | GATT server, advertising, notifications (HAP over BLE only) |
+
+## Quick Start
+
+### Examples
+
+| Example | Transport | Platform | Description |
+|---------|-----------|----------|-------------|
+| [`examples/esp32/`](examples/esp32/) | BLE | ESP-IDF | HAP-BLE lightbulb using NimBLE |
+| [`examples/linux/`](examples/linux/) | IP | Linux | HAP over IP using OpenSSL and Avahi |
+
+## Project Structure
+
 ```
-
-### 3. Create and Configure Server
-
-```cpp
-#include "hap/HAP.hpp"
-#include "hap/AccessoryServer.hpp"
-
-EspCrypto crypto;
-EspNetwork network;
-EspStorage storage;
-EspSystem system;
-
-hap::AccessoryServer::Config config;
-config.crypto = &crypto;
-config.network = &network;
-config.storage = &storage;
-config.system = &system;
-
-hap::AccessoryServer server(config);
-
-// Create an accessory
-auto accessory = std::make_shared<hap::core::Accessory>(1);
-auto lightbulb = std::make_shared<hap::core::Service>(0x43, "Lightbulb");
-auto on_char = std::make_shared<hap::core::Characteristic>(
-    0x25, // "On" characteristic
-    hap::core::Format::Bool,
-    std::vector{hap::core::Permission::PairedRead, 
-                hap::core::Permission::PairedWrite,
-                hap::core::Permission::Notify}
-);
-
-lightbulb->add_characteristic(on_char);
-accessory->add_service(lightbulb);
-server.add_accessory(accessory);
-
-server.start();
+horizon-hap/
+├── include/hap/
+│   ├── core/              # HAP object model
+│   │   ├── Accessory.hpp
+│   │   ├── Service.hpp
+│   │   ├── Characteristic.hpp
+│   │   └── TLV8.hpp
+│   ├── platform/          # Abstract platform interfaces
+│   │   ├── Crypto.hpp
+│   │   ├── CryptoSRP.hpp
+│   │   ├── Network.hpp
+│   │   ├── Storage.hpp
+│   │   ├── System.hpp
+│   │   └── Ble.hpp
+│   ├── transport/         # Protocol implementations
+│   │   ├── HTTP.hpp
+│   │   ├── BleTransport.hpp
+│   │   ├── SecureSession.hpp
+│   │   └── PairingEndpoints.hpp
+│   ├── pairing/           # Pairing protocol
+│   │   ├── PairSetup.hpp
+│   │   └── PairVerify.hpp
+│   └── AccessoryServer.hpp
+├── src/                   # Implementation files
+├── examples/
+│   ├── esp32/             # ESP-IDF BLE example
+│   └── linux/             # Linux IP example
+└── tests/                 # Unit tests
 ```
 
 ## Build Requirements
 
-- CMake 3.20+
-- C++20 compatible compiler
-- Ninja (recommended build tool)
+- **CMake** 3.20+
+- **C++20** compatible compiler (GCC 10+, Clang 12+)
+- **nlohmann/json** (fetched automatically via CMake)
 
-## Building Standalone
+### Building Standalone (Tests)
 
 ```bash
 cmake -S . -B build -DBUILD_TESTING=ON
 cmake --build build
-./build/tests/verify_architecture
+ctest --test-dir build
+```
+
+### Building ESP32 Example
+
+```bash
+cd examples/esp32
+idf.py set-target {chip model e.g. esp32c6}
+idf.py build
+idf.py -p /dev/ttyUSB0 flash monitor
+```
+
+### Building Linux Example
+
+```bash
+cd examples/linux
+cmake -S . -B build
+cmake --build build
+./build/hap_lightbulb_example
 ```
 
 ## License
