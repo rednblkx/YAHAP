@@ -1,12 +1,3 @@
-idf_component_register(
-    SRC_DIRS 
-        "hap/src"
-        "hap/src/core"
-        "hap/src/pairing"
-        "hap/src/platform"
-        "hap/src/transport"
-    INCLUDE_DIRS 
-        "hap/include"
-    REQUIRES
-        nlohmann-json
-)
+idf_component_register()
+add_subdirectory(hap)
+target_link_libraries(${COMPONENT_LIB} INTERFACE hap)
