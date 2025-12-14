@@ -52,15 +52,6 @@ else()
     target_compile_options(hap PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
 
-# Exporting the target for consumers
-install(TARGETS hap EXPORT hapTargets)
-install(EXPORT hapTargets
-    FILE hapTargets.cmake
-    NAMESPACE hap::
-    DESTINATION lib/cmake/hap
-)
-install(DIRECTORY include/hap DESTINATION include)
-
 # Testing (only if standalone build)
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     include(CTest)
