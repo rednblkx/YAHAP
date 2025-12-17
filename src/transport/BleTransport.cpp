@@ -740,7 +740,9 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
             if (svc) {
                 is_primary = svc->is_primary();
                 found = true;
-                // TODO: Get linked services from svc->linked_services() if available
+                for (uint64_t linked_iid : svc->linked_services()) {
+                    linked_services.push_back(static_cast<uint16_t>(linked_iid));
+                }
             }
         }
 
