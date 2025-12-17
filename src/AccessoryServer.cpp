@@ -24,6 +24,35 @@ public:
 };
 
 AccessoryServer::AccessoryServer(Config config) : config_(std::move(config)), impl_(std::make_unique<Impl>()) {
+    // Auto-generate accessory ID if not provided
+    if (config_.accessory_id.empty()) {
+        auto stored_id = config_.storage->get("accessory_id");
+        if (stored_id && !stored_id->empty()) {
+            config_.accessory_id = std::string(stored_id->begin(), stored_id->end());
+            config_.system->log(platform::System::LogLevel::Info, 
+                "[AccessoryServer] Loaded stored accessory ID: " + config_.accessory_id);
+        } else {
+            // Generate random 6 bytes and format as MAC address
+            uint8_t random_id[6];
+            config_.system->random_bytes(std::span<uint8_t>(random_id, 6));
+            
+            std::ostringstream oss;
+            oss << std::hex << std::uppercase << std::setfill('0');
+            for (int i = 0; i < 6; ++i) {
+                if (i > 0) oss << ":";
+                oss << std::setw(2) << static_cast<int>(random_id[i]);
+            }
+            config_.accessory_id = oss.str();
+            
+            // Store for future boots
+            std::vector<uint8_t> id_bytes(config_.accessory_id.begin(), config_.accessory_id.end());
+            config_.storage->set("accessory_id", id_bytes);
+            
+            config_.system->log(platform::System::LogLevel::Info, 
+                "[AccessoryServer] Generated new accessory ID: " + config_.accessory_id);
+        }
+    }
+    
     // Initialize endpoints
     transport::PairingEndpoints::Config pairing_config;
     pairing_config.crypto = config_.crypto;
@@ -33,6 +62,16 @@ AccessoryServer::AccessoryServer(Config config) : config_(std::move(config)), im
     pairing_config.setup_code = config_.setup_code;
     pairing_config.on_pairings_changed = [this]() {
         config_.system->log(platform::System::LogLevel::Info, "[AccessoryServer] Pairings changed, updating mDNS and BLE advertising");
+        
+        // Check if all pairings have been removed
+        auto pairing_list_data = config_.storage->get("pairing_list");
+        bool is_unpaired = !pairing_list_data || pairing_list_data->size() <= 2;
+        
+        if (is_unpaired) {
+            // Clear all state and regenerate identifiers
+            reset_pairing_state();
+        }
+        
         update_mdns();
         if (impl_->ble_transport) {
             impl_->ble_transport->update_advertising();
@@ -230,6 +269,77 @@ void AccessoryServer::stop() {
     
     impl_->connections.clear();
     impl_->parsers.clear();
+}
+
+void AccessoryServer::reset_pairing_state() {
+    // Clear ALL pairing-related storage keys
+    const char* keys_to_clear[] = {
+        "accessory_id",      // Device ID
+        "setup_id",          // BLE Setup ID
+        "accessory_ltsk",    // Long-term secret key
+        "accessory_ltpk",    // Long-term public key
+        "pairing_list",      // List of paired controllers
+        "gsn",               // Global State Number
+        "config_number",     // Configuration number
+        "db_hash",           // Database hash (for config number)
+    };
+    
+    for (const char* key : keys_to_clear) {
+        config_.storage->remove(key);
+    }
+    
+    config_.system->log(platform::System::LogLevel::Info, 
+        "[AccessoryServer] All pairing state cleared");
+    
+    // Generate new accessory ID
+    uint8_t random_id[6];
+    config_.system->random_bytes(std::span<uint8_t>(random_id, 6));
+    
+    std::ostringstream oss;
+    oss << std::hex << std::uppercase << std::setfill('0');
+    for (int i = 0; i < 6; ++i) {
+        if (i > 0) oss << ":";
+        oss << std::setw(2) << static_cast<int>(random_id[i]);
+    }
+    config_.accessory_id = oss.str();
+    
+    // Store new ID
+    std::vector<uint8_t> id_bytes(config_.accessory_id.begin(), config_.accessory_id.end());
+    config_.storage->set("accessory_id", id_bytes);
+    
+    config_.system->log(platform::System::LogLevel::Info, 
+        "[AccessoryServer] Generated new accessory ID: " + config_.accessory_id);
+    
+    // Reset all in-memory session state
+    if (impl_->pairing_endpoints) {
+        impl_->pairing_endpoints->set_accessory_id(config_.accessory_id);
+        impl_->pairing_endpoints->reset();
+    }
+    
+    // Update BleTransport with new accessory ID
+    if (impl_->ble_transport) {
+        impl_->ble_transport->set_accessory_id(config_.accessory_id);
+    }
+    
+    // Clear any active TCP connections
+    impl_->connections.clear();
+    impl_->parsers.clear();
+}
+
+void AccessoryServer::factory_reset() {
+    config_.system->log(platform::System::LogLevel::Warning, 
+        "[AccessoryServer] Factory reset initiated");
+    
+    reset_pairing_state();
+    
+    // Update advertising/mDNS
+    update_mdns();
+    if (impl_->ble_transport) {
+        impl_->ble_transport->update_advertising();
+    }
+    
+    config_.system->log(platform::System::LogLevel::Info, 
+        "[AccessoryServer] Factory reset complete - accessory is now unpaired");
 }
 
 void AccessoryServer::on_tcp_receive(uint32_t connection_id, std::span<const uint8_t> data) {

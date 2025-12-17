@@ -227,4 +227,18 @@ Response PairingEndpoints::handle_pairings(const Request& req, ConnectionContext
     return resp;
 }
 
+void PairingEndpoints::set_accessory_id(const std::string& new_id) {
+    config_.accessory_id = new_id;
+    config_.system->log(platform::System::LogLevel::Info, 
+        "[PairingEndpoints] Accessory ID updated to: " + new_id);
+}
+
+void PairingEndpoints::reset() {
+    // Clear all session state
+    pair_setup_sessions_.clear();
+    pair_verify_sessions_.clear();
+    config_.system->log(platform::System::LogLevel::Info, 
+        "[PairingEndpoints] All sessions cleared");
+}
+
 } // namespace hap::transport

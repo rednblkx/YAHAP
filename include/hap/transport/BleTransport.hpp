@@ -51,9 +51,13 @@ public:
 
     /**
      * @brief Update BLE advertising data.
-     *        Called when pairing status changes to update SF flag.
      */
     void update_advertising();
+
+    /**
+     * @brief Update the accessory ID at runtime.
+     */
+    void set_accessory_id(const std::string& new_id);
 
 private:
     Config config_;

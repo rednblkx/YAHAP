@@ -61,6 +61,12 @@ public:
      */
     void stop();
 
+    /**
+     * @brief Factory reset - clears all pairing state and regenerates identifiers.
+     *        Call this to make the accessory appear as a completely new device.
+     */
+    void factory_reset();
+
 private:
     Config config_;
     core::AttributeDatabase database_;
@@ -76,6 +82,7 @@ private:
     void on_tcp_disconnect(uint32_t connection_id);
     void update_mdns();
     void check_and_update_config_number();
+    void reset_pairing_state();
 };
 
 } // namespace hap

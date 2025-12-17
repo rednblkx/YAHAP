@@ -44,6 +44,16 @@ public:
      */
     Response handle_pairings(const Request& req, ConnectionContext& ctx);
 
+    /**
+     * @brief Update accessory ID
+     */
+    void set_accessory_id(const std::string& new_id);
+
+    /**
+     * @brief Reset all session state
+     */
+    void reset();
+
 private:
     Config config_;
     

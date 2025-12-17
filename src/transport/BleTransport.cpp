@@ -449,6 +449,12 @@ void BleTransport::update_advertising() {
     config_.ble->start_advertising(adv);
 }
 
+void BleTransport::set_accessory_id(const std::string& new_id) {
+    config_.accessory_id = new_id;
+    config_.system->log(platform::System::LogLevel::Info, 
+        "[BleTransport] Accessory ID updated to: " + new_id);
+}
+
 void BleTransport::increment_gsn() {
     // Per Spec 7.4.6: GSN increments on characteristic changes
     // Range: 1-65535, wraps to 1 on overflow
