@@ -19,7 +19,6 @@ void PairSetup::reset() {
 }
 
 void PairSetup::ensure_long_term_keys() {
-    // Try to load from storage
     auto ltsk_data = config_.storage->get("accessory_ltsk");
     auto ltpk_data = config_.storage->get("accessory_ltpk");
     
@@ -27,10 +26,8 @@ void PairSetup::ensure_long_term_keys() {
         std::copy_n(ltsk_data->begin(), 64, accessory_ltsk_.begin());
         std::copy_n(ltpk_data->begin(), 32, accessory_ltpk_.begin());
     } else {
-        // Generate new keys
         config_.crypto->ed25519_generate_keypair(accessory_ltpk_, accessory_ltsk_);
         
-        // Save to storage
         config_.storage->set("accessory_ltpk", accessory_ltpk_);
         config_.storage->set("accessory_ltsk", accessory_ltsk_);
     }
@@ -42,7 +39,6 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_request(std::span<const ui
     
     auto tlvs = core::TLV8::parse(request_tlv);
     
-    // Check state TLV
     auto state_val = core::TLV8::find_uint8(tlvs, static_cast<uint8_t>(TLVType::State));
     if (!state_val) {
         config_.system->log(platform::System::LogLevel::Error, 
@@ -77,7 +73,6 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m1(const std::vector<core:
         return build_error_response(PairingState::M2, TLVError::Unknown);
     }
     
-    // Verify method is Pair Setup
     auto method = core::TLV8::find_uint8(request, static_cast<uint8_t>(TLVType::Method));
     if (!method || *method != static_cast<uint8_t>(PairingMethod::PairSetup)) {
         config_.system->log(platform::System::LogLevel::Error, 
@@ -86,7 +81,6 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m1(const std::vector<core:
     }
     
     config_.system->log(platform::System::LogLevel::Debug, "[PairSetup] Creating SRP verifier");
-    // Create SRP session
     srp_session_ = config_.crypto->srp_new_verifier("Pair-Setup", config_.setup_code);
     if (!srp_session_) {
         config_.system->log(platform::System::LogLevel::Error, 
@@ -94,7 +88,6 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m1(const std::vector<core:
         return build_error_response(PairingState::M2, TLVError::Unknown);
     }
     
-    // Get salt and public key from SRP
     auto salt = config_.crypto->srp_get_salt(srp_session_.get());
     auto public_key = config_.crypto->srp_get_public_key(srp_session_.get());
     
@@ -102,7 +95,6 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m1(const std::vector<core:
         "[PairSetup] SRP salt size: " + std::to_string(salt.size()) + 
         ", public key size: " + std::to_string(public_key.size()));
     
-    // Build M2 response
     std::vector<core::TLV> response_tlvs;
     response_tlvs.emplace_back(static_cast<uint8_t>(TLVType::State), static_cast<uint8_t>(PairingState::M2));
     response_tlvs.emplace_back(static_cast<uint8_t>(TLVType::Salt), std::span(salt));
@@ -122,7 +114,6 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m3(const std::vector<core:
         return build_error_response(PairingState::M4, TLVError::Unknown);
     }
     
-    // Extract client public key and proof
     auto client_public_key = core::TLV8::find(request, static_cast<uint8_t>(TLVType::PublicKey));
     auto client_proof = core::TLV8::find(request, static_cast<uint8_t>(TLVType::Proof));
     
@@ -136,14 +127,12 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m3(const std::vector<core:
         "[PairSetup] Client public key size: " + std::to_string(client_public_key->size()) + 
         ", proof size: " + std::to_string(client_proof->size()));
     
-    // Set client public key
     if (!config_.crypto->srp_set_client_public_key(srp_session_.get(), *client_public_key)) {
         config_.system->log(platform::System::LogLevel::Error, 
             "[PairSetup] Failed to set client public key");
         return build_error_response(PairingState::M4, TLVError::Authentication);
     }
     
-    // Verify client proof
     config_.system->log(platform::System::LogLevel::Debug, "[PairSetup] Verifying client proof");
     if (!config_.crypto->srp_verify_client_proof(srp_session_.get(), *client_proof)) {
         config_.system->log(platform::System::LogLevel::Error, 
@@ -153,7 +142,6 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m3(const std::vector<core:
     
     config_.system->log(platform::System::LogLevel::Info, "[PairSetup] Client proof verified successfully");
     
-    // Get server proof and session key
     auto server_proof = config_.crypto->srp_get_server_proof(srp_session_.get());
     session_key_ = config_.crypto->srp_get_session_key(srp_session_.get());
     
@@ -161,7 +149,6 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m3(const std::vector<core:
         "[PairSetup] Server proof size: " + std::to_string(server_proof.size()) + 
         ", session key size: " + std::to_string(session_key_.size()));
     
-    // Build M4 response
     std::vector<core::TLV> response_tlvs;
     response_tlvs.emplace_back(static_cast<uint8_t>(TLVType::State), static_cast<uint8_t>(PairingState::M4));
     response_tlvs.emplace_back(static_cast<uint8_t>(TLVType::Proof), server_proof);
@@ -180,7 +167,6 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m5(const std::vector<core:
         return build_error_response(PairingState::M6, TLVError::Unknown);
     }
     
-    // Extract encrypted data
     auto encrypted_data_tlv = core::TLV8::find(request, static_cast<uint8_t>(TLVType::EncryptedData));
     if (!encrypted_data_tlv || encrypted_data_tlv->size() < 16) {
         config_.system->log(platform::System::LogLevel::Error, 
@@ -191,13 +177,10 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m5(const std::vector<core:
     config_.system->log(platform::System::LogLevel::Debug, 
         "[PairSetup] Encrypted data size: " + std::to_string(encrypted_data_tlv->size()));
 
-    
-    // Split encrypted data and auth tag
     std::vector<uint8_t> ciphertext(encrypted_data_tlv->begin(), encrypted_data_tlv->end() - 16);
     std::array<uint8_t, 16> auth_tag;
     std::copy_n(encrypted_data_tlv->end() - 16, 16, auth_tag.begin());
     
-    // Derive SessionKey from SRP shared secret using HKDF
     std::array<uint8_t, 32> session_key;
     config_.system->log(platform::System::LogLevel::Debug, "[PairSetup] Deriving session key using HKDF");
     config_.system->log(platform::System::LogLevel::Debug, "[PairSetup] Session key size: " + std::to_string(session_key_.size()));
@@ -212,7 +195,6 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m5(const std::vector<core:
         session_key
     );
     
-    // Decrypt with ChaCha20-Poly1305
     const char nonce_str[] = "\x00\x00\x00\x00PS-Msg05";
     std::array<uint8_t, 12> nonce = {};
     std::copy_n(nonce_str, sizeof(nonce_str) - 1, nonce.begin());
@@ -229,7 +211,6 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m5(const std::vector<core:
     config_.system->log(platform::System::LogLevel::Debug, 
         "[PairSetup] Decrypted " + std::to_string(plaintext.size()) + " bytes");
     
-    // Parse decrypted sub-TLV
     auto sub_tlvs = core::TLV8::parse(plaintext);
     auto ios_identifier = core::TLV8::find(sub_tlvs, static_cast<uint8_t>(TLVType::Identifier));
     auto ios_ltpk = core::TLV8::find(sub_tlvs, static_cast<uint8_t>(TLVType::PublicKey));
@@ -254,7 +235,6 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m5(const std::vector<core:
     ios_device_info.insert(ios_device_info.end(), ios_identifier->begin(), ios_identifier->end());
     ios_device_info.insert(ios_device_info.end(), ios_ltpk->begin(), ios_ltpk->end());
     
-    // Verify signature
     std::array<uint8_t, 32> ios_ltpk_arr;
     std::copy_n(ios_ltpk->begin(), 32, ios_ltpk_arr.begin());
     std::array<uint8_t, 64> ios_sig_arr;
@@ -269,14 +249,12 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m5(const std::vector<core:
     
     config_.system->log(platform::System::LogLevel::Info, "[PairSetup] iOS device signature verified successfully");
     
-    // Save pairing
     std::string pairing_id(ios_identifier->begin(), ios_identifier->end());
     std::string pairing_key = "pairing_" + pairing_id;
     config_.system->log(platform::System::LogLevel::Info, 
         "[PairSetup] Saving pairing for controller: " + pairing_id);
     config_.storage->set(pairing_key, *ios_ltpk);
 
-    // Update pairing list
     auto list_data = config_.storage->get("pairing_list");
     nlohmann::json list_json;
     if (list_data) {
@@ -288,7 +266,6 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m5(const std::vector<core:
         list_json = nlohmann::json::array();
     }
     
-    // Add if not exists
     bool exists = false;
     for (const auto& id : list_json) {
         if (id == pairing_id) {
@@ -302,7 +279,6 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m5(const std::vector<core:
         std::vector<uint8_t> list_bytes(list_str.begin(), list_str.end());
         config_.storage->set("pairing_list", list_bytes);
         
-        // Notify callback
         if (config_.on_pairings_changed) {
             config_.on_pairings_changed();
         }
@@ -325,11 +301,9 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m5(const std::vector<core:
     accessory_info.insert(accessory_info.end(), config_.accessory_id.begin(), config_.accessory_id.end());
     accessory_info.insert(accessory_info.end(), accessory_ltpk_.begin(), accessory_ltpk_.end());
     
-    // Sign AccessoryInfo
     std::array<uint8_t, 64> accessory_signature;
     config_.crypto->ed25519_sign(accessory_ltsk_, accessory_info, accessory_signature);
     
-    // Build sub-TLV
     std::vector<core::TLV> sub_tlvs_resp;
     sub_tlvs_resp.emplace_back(static_cast<uint8_t>(TLVType::Identifier), config_.accessory_id);
     sub_tlvs_resp.emplace_back(static_cast<uint8_t>(TLVType::PublicKey), std::span(accessory_ltpk_));
@@ -337,7 +311,6 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m5(const std::vector<core:
     
     auto sub_tlv_data = core::TLV8::encode(sub_tlvs_resp);
     
-    // Encrypt sub-TLV
     const char nonce_m6_str[] = "\x00\x00\x00\x00PS-Msg06";
     std::array<uint8_t, 12> nonce_m6 = {};
     std::copy_n(nonce_m6_str, sizeof(nonce_m6_str) - 1, nonce_m6.begin());
@@ -350,10 +323,8 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m5(const std::vector<core:
         return build_error_response(PairingState::M6, TLVError::Unknown);
     }
     
-    // Append auth tag to ciphertext
     ciphertext_m6.insert(ciphertext_m6.end(), auth_tag_m6.begin(), auth_tag_m6.end());
     
-    // Build M6 response
     std::vector<core::TLV> response_tlvs;
     response_tlvs.emplace_back(static_cast<uint8_t>(TLVType::State), static_cast<uint8_t>(PairingState::M6));
     response_tlvs.emplace_back(static_cast<uint8_t>(TLVType::EncryptedData), ciphertext_m6);
