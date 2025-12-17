@@ -88,6 +88,7 @@ private:
     // Accessory's long-term keys
     std::array<uint8_t, 32> accessory_ltpk_;
     std::array<uint8_t, 64> accessory_ltsk_;
+    bool keys_valid_ = false;
     
     // Message handlers
     std::optional<std::vector<uint8_t>> handle_m1(const std::vector<core::TLV>& request);
