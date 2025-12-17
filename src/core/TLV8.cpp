@@ -7,27 +7,23 @@ std::vector<TLV> TLV8::parse(std::span<const uint8_t> data) {
     size_t offset = 0;
 
     while (offset < data.size()) {
-        // Need at least 2 bytes for Type and Length
         if (offset + 2 > data.size()) {
-            break; // Or throw? Spec says ignore trailing bytes if incomplete?
+            break;
         }
 
         uint8_t type = data[offset++];
         uint8_t length = data[offset++];
 
         if (offset + length > data.size()) {
-            break; // Incomplete value
+            break;
         }
 
         std::span<const uint8_t> value_span = data.subspan(offset, length);
         offset += length;
 
-        // Check for fragmentation (previous item has same type and length 255)
         if (!result.empty() && result.back().type == type && result.back().value.size() % 255 == 0 && !result.back().value.empty()) {
-            // Append to previous item
             result.back().value.insert(result.back().value.end(), value_span.begin(), value_span.end());
         } else {
-            // New item
             result.emplace_back(type, std::vector<uint8_t>(value_span.begin(), value_span.end()));
         }
     }
@@ -44,7 +40,6 @@ std::vector<uint8_t> TLV8::encode(const std::vector<TLV>& tlvs) {
         size_t remaining = value.size();
 
         if (remaining == 0) {
-            // Empty value
             buffer.push_back(item.type);
             buffer.push_back(0);
         } else {
