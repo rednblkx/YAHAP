@@ -14,9 +14,6 @@ Ble::Advertisement Ble::Advertisement::create_hap(
     adv.company_id = 0x004C;
     adv.flags = 6; // LE General Discoverable | BR/EDR Not Supported
 
-    // HAP-BLE 2.0 Regular Advertisement Format
-    // Per Spec R13 Section 7.4.2.1 Table 7-40 and 7-41
-    // 
     // Manufacturer Specific Data Structure:
     // Field      | Size | Description
     // -----------|------|------------------------------------------
@@ -29,8 +26,6 @@ Ble::Advertisement Ble::Advertisement::create_hap(
     // CN         | 1    | Configuration Number (1-255, wraps to 1)
     // CV         | 1    | Compatible Version (0x02 for HAP-BLE 2.0)
     // SH         | 4    | Setup Hash
-    // 
-    // Total: 2 + 17 = 19 bytes
     
     adv.manufacturer_data.reserve(19);
     
