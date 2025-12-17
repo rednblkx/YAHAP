@@ -37,8 +37,19 @@ public:
 
     /**
      * @brief Upgrade connection to secure session
+     * @param session_keys Tuple of (A2C key, C2A key)
+     * @param shared_secret X25519 shared secret
+     * @param controller_id Authenticated controller identifier
      */
-    void upgrade_to_secure(std::tuple<std::array<uint8_t, 32>, std::array<uint8_t, 32>> session_keys, std::string controller_id);
+    void upgrade_to_secure(
+        std::tuple<std::array<uint8_t, 32>, std::array<uint8_t, 32>> session_keys,
+        const std::array<uint8_t, 32>& shared_secret,
+        std::string controller_id);
+
+    /**
+     * @brief Get session shared secret
+     */
+    const std::array<uint8_t, 32>& session_shared_secret() const { return session_shared_secret_; }
 
     const std::string& controller_id() const { return controller_id_; }
     bool is_admin() const { return !controller_id_.empty(); } // Currently all paired controllers are admins
@@ -67,6 +78,7 @@ private:
     std::unique_ptr<SecureSession> secure_session_;
     bool rx_encrypted_ = false;
     std::string controller_id_;
+    std::array<uint8_t, 32> session_shared_secret_ = {};
     bool should_close_ = false;
     
     // Subscriptions (AID, IID)

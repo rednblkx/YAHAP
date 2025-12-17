@@ -62,6 +62,11 @@ public:
      */
     const std::string& get_controller_id() const { return controller_id_; }
 
+    /**
+     * @brief Get the X25519 shared secret (only valid after M1 processing).
+     */
+    const std::array<uint8_t, 32>& get_shared_secret() const { return shared_secret_; }
+
 private:
     Config config_;
     std::string controller_id_;

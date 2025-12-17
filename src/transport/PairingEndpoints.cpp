@@ -91,7 +91,10 @@ Response PairingEndpoints::handle_pair_verify(const Request& req, ConnectionCont
         if (session->is_verified()) {
             config_.system->log(platform::System::LogLevel::Info, 
                 "[PairingEndpoints] Pair-verify succeeded - upgrading connection to encrypted");
-            ctx.upgrade_to_secure(session->get_session_keys(), session->get_controller_id());
+            ctx.upgrade_to_secure(
+                session->get_session_keys(),
+                session->get_shared_secret(),
+                session->get_controller_id());
         } else {
             config_.system->log(platform::System::LogLevel::Debug, 
                 "[PairingEndpoints] Pair-verify response sent (" + std::to_string(response_tlv->size()) + " bytes)");

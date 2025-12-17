@@ -1164,14 +1164,48 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         std::vector<core::TLV> resp_tlvs;
         
         if (gen_key_tlv) {
-            // Generate broadcast encryption key
-            // Per Spec 7.4.7.3: HKDF-SHA-512 with session shared secret
-            // For now, return placeholder (requires session context)
+            // Generate broadcast encryption key per HAP Spec 7.4.7.3:
+            // BroadcastEncryptionKey = HKDF-SHA-512(
+            //     IKM = Current Session shared secret,
+            //     Salt = Controller's Ed25519 long-term public key,
+            //     Info = "Broadcast-Encryption-Key",
+            //     L = 32 bytes
+            // )
             config_.system->log(platform::System::LogLevel::Info,
                 "[BleTransport] Protocol Config: Generate Broadcast Encryption Key requested");
             
-            // TODO: Implement actual key generation when session context is available
-            // For now, return empty key to indicate not implemented
+            if (!connections_.contains(connection_id) || !connections_[connection_id]->is_encrypted()) {
+                config_.system->log(platform::System::LogLevel::Error,
+                    "[BleTransport] Protocol Config: Cannot generate key - no secure session");
+                status = 0x06; // Invalid Request
+            } else {
+                auto& ctx = *connections_[connection_id];
+                
+                // Get controller LTPK from storage
+                std::string pairing_key = "pairing_" + ctx.controller_id();
+                auto controller_ltpk = config_.storage->get(pairing_key);
+                
+                if (!controller_ltpk || controller_ltpk->size() != 32) {
+                    config_.system->log(platform::System::LogLevel::Error,
+                        "[BleTransport] Protocol Config: Controller LTPK not found for: " + ctx.controller_id());
+                    status = 0x06; // Invalid Request
+                } else {
+                    // Derive broadcast encryption key using HKDF-SHA-512
+                    std::array<uint8_t, 32> broadcast_key;
+                    config_.crypto->hkdf_sha512(
+                        ctx.session_shared_secret(),                                         // IKM: Session shared secret
+                        std::span<const uint8_t>(controller_ltpk->data(), 32),              // Salt: Controller LTPK
+                        std::span(reinterpret_cast<const uint8_t*>("Broadcast-Encryption-Key"), 24), // Info
+                        broadcast_key                                                        // Output: 32 bytes
+                    );
+                    
+                    // TLV 0x04: Broadcast Encryption Key
+                    resp_tlvs.emplace_back(0x04, std::vector<uint8_t>(broadcast_key.begin(), broadcast_key.end()));
+                    
+                    config_.system->log(platform::System::LogLevel::Info,
+                        "[BleTransport] Protocol Config: Generated Broadcast Encryption Key successfully");
+                }
+            }
         }
         
         if (get_all_tlv || true) {

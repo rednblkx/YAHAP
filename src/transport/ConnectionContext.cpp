@@ -5,9 +5,13 @@ namespace hap::transport {
 ConnectionContext::ConnectionContext(platform::Crypto* crypto, platform::System* system, uint32_t connection_id)
     : crypto_(crypto), system_(system), connection_id_(connection_id) {}
 
-void ConnectionContext::upgrade_to_secure(std::tuple<std::array<uint8_t, 32>, std::array<uint8_t, 32>> session_keys, std::string controller_id) {
+void ConnectionContext::upgrade_to_secure(
+    std::tuple<std::array<uint8_t, 32>, std::array<uint8_t, 32>> session_keys,
+    const std::array<uint8_t, 32>& shared_secret,
+    std::string controller_id) {
     auto [a_key, c_key] = session_keys;
     secure_session_ = std::make_unique<SecureSession>(crypto_, a_key, c_key);
+    session_shared_secret_ = shared_secret;
     controller_id_ = std::move(controller_id);
 }
 
