@@ -10,10 +10,9 @@ AccessoryEndpoints::AccessoryEndpoints(core::AttributeDatabase* database)
     : database_(database) {}
 
 Response AccessoryEndpoints::handle_get_accessories(const Request& req, ConnectionContext& ctx) {
-    (void)req; // Unused
-    (void)ctx; // Unused
+    (void)req;
+    (void)ctx;
     
-    // Serialize database to JSON
     std::string json_str = database_->to_json_string();
     
     Response resp{Status::OK};
@@ -24,10 +23,9 @@ Response AccessoryEndpoints::handle_get_accessories(const Request& req, Connecti
 }
 
 Response AccessoryEndpoints::handle_get_characteristics(const Request& req, ConnectionContext& ctx) {
-    (void)ctx; // Unused
+    (void)ctx;
     
-    // Parse query string to get characteristic IDs
-    // Expected format: ?id=1.2,1.3,2.4
+    // ?id=1.2,1.3,2.4
     std::string query;
     size_t query_start = req.path.find('?');
     if (query_start != std::string::npos) {
@@ -36,7 +34,6 @@ Response AccessoryEndpoints::handle_get_characteristics(const Request& req, Conn
     
     auto char_ids = parse_characteristic_ids(query);
     
-    // Build JSON response
     json response;
     json characteristics = json::array();
     
@@ -47,14 +44,12 @@ Response AccessoryEndpoints::handle_get_characteristics(const Request& req, Conn
             char_json["aid"] = aid;
             char_json["iid"] = iid;
             
-            // Check if characteristic is readable
             if (!core::has_permission(characteristic->permissions(), core::Permission::PairedRead)) {
                 char_json["status"] = core::to_int(core::HAPStatus::WriteOnlyCharacteristic);
                 characteristics.push_back(char_json);
                 continue;
             }
             
-            // Get value
             auto value = characteristic->get_value();
             std::visit([&char_json](auto&& arg) {
                 using T = std::decay_t<decltype(arg)>;
@@ -68,8 +63,6 @@ Response AccessoryEndpoints::handle_get_characteristics(const Request& req, Conn
                 }
             }, value);
             
-            // Only include status if not success (0)
-            // char_json["status"] = core::to_int(core::HAPStatus::Success); 
             characteristics.push_back(char_json);
         } else {
             json char_json;
@@ -90,8 +83,7 @@ Response AccessoryEndpoints::handle_get_characteristics(const Request& req, Conn
 }
 
 Response AccessoryEndpoints::handle_put_characteristics(const Request& req, ConnectionContext& ctx) {
-    (void)ctx; // Unused
-    // Parse JSON body
+    (void)ctx;
     std::string body_str(req.body.begin(), req.body.end());
     auto body_json = json::parse(body_str, nullptr, false);
     if (body_json.is_discarded()) {
@@ -106,7 +98,6 @@ Response AccessoryEndpoints::handle_put_characteristics(const Request& req, Conn
         return resp;
     }
     
-    // Build response
     json response;
     json characteristics = json::array();
     bool any_error = false;
@@ -131,7 +122,6 @@ Response AccessoryEndpoints::handle_put_characteristics(const Request& req, Conn
         bool processed = false;
         int status = core::to_int(core::HAPStatus::Success);
 
-        // Handle Events
         if (char_req.contains("ev")) {
             bool enable = char_req["ev"];
             if (core::has_permission(characteristic->permissions(), core::Permission::Notify)) {
@@ -144,9 +134,7 @@ Response AccessoryEndpoints::handle_put_characteristics(const Request& req, Conn
             }
         }
 
-        // Handle Value Write
         if (char_req.contains("value")) {
-            // Check for Timed Write permission
             if (core::has_permission(characteristic->permissions(), core::Permission::TimedWrite)) {
                 if (!char_req.contains("pid")) {
                     status = core::to_int(core::HAPStatus::InvalidValueInRequest);
@@ -159,14 +147,11 @@ Response AccessoryEndpoints::handle_put_characteristics(const Request& req, Conn
             }
 
             if (status == core::to_int(core::HAPStatus::Success)) {
-                // Check if characteristic is writable
                 if (!core::has_permission(characteristic->permissions(), core::Permission::PairedWrite)) {
                     status = core::to_int(core::HAPStatus::ReadOnlyCharacteristic);
                 } else {
-                // Set value
                 auto& value_json = char_req["value"];
                 
-                // Convert JSON value to characteristic value
                 bool valid_value = true;
                 auto source = core::EventSource::from_connection(ctx.connection_id());
                     switch (characteristic->format()) {
@@ -275,7 +260,6 @@ Response AccessoryEndpoints::handle_put_characteristics(const Request& req, Conn
             char_json["iid"] = iid;
             char_json["status"] = status;
             
-            // Include value if WriteResponse permission is present and success
             if (status == core::to_int(core::HAPStatus::Success) && 
                 core::has_permission(characteristic->permissions(), core::Permission::WriteResponse)) {
                 auto value = characteristic->get_value();
@@ -297,15 +281,12 @@ Response AccessoryEndpoints::handle_put_characteristics(const Request& req, Conn
     }
     
     if (any_error) {
-        // 207 Multi-Status
         response["characteristics"] = characteristics;
         Response resp{Status::MultiStatus};
         resp.set_header("Content-Type", "application/hap+json");
         resp.set_body(response.dump());
         return resp;
     } else if (write_response_needed) {
-        // 200 OK with values
-        // Filter to only include those with values
         json final_chars = json::array();
             for (auto& c : characteristics) {
                 if (c.contains("value")) {
@@ -322,7 +303,6 @@ Response AccessoryEndpoints::handle_put_characteristics(const Request& req, Conn
         resp.set_body(response.dump());
         return resp;
     } else {
-        // 204 No Content
         return Response{Status::NoContent};
     }
 }
@@ -330,20 +310,16 @@ Response AccessoryEndpoints::handle_put_characteristics(const Request& req, Conn
 std::vector<std::pair<uint64_t, uint64_t>> AccessoryEndpoints::parse_characteristic_ids(const std::string& query) {
     std::vector<std::pair<uint64_t, uint64_t>> result;
     
-    // Find "id=" parameter
     size_t id_start = query.find("id=");
     if (id_start == std::string::npos) {
         return result;
     }
     
-    // Extract the value after "id="
     std::string ids_str = query.substr(id_start + 3);
     
-    // Split by comma
     std::istringstream iss(ids_str);
     std::string token;
     while (std::getline(iss, token, ',')) {
-        // Split by dot
         size_t dot_pos = token.find('.');
         if (dot_pos != std::string::npos) {
             uint64_t aid = std::stoull(token.substr(0, dot_pos));

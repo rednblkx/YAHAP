@@ -126,7 +126,7 @@ void BleTransport::stop() {
 }
 
 void BleTransport::setup_hap_service() {
-    uint16_t svc_iid = next_iid_++; // Pairing Service
+    uint16_t svc_iid = next_iid_++;
     platform::Ble::ServiceDefinition hap_service;
     hap_service.uuid = kHapPairingServiceUUID;
     hap_service.is_primary = true;
@@ -216,7 +216,7 @@ void BleTransport::setup_hap_service() {
          platform::Ble::CharacteristicDefinition def;
         def.uuid = "0000004F-0000-1000-8000-0026BB765291";
         def.properties.read = true;
-        def.properties.write = true;  // Need write to accept HAP PDU read requests
+        def.properties.write = true;
         def.properties.indicate = false;
         def.properties.notify = false;
         def.on_write = [this](uint16_t conn, std::span<const uint8_t> data, bool) {
@@ -376,7 +376,7 @@ void BleTransport::update_advertising() {
     }
     
     std::string input = setup_id + config_.accessory_id;
-    std::vector<uint8_t> hash_output(64); // SHA-512 produces 64 bytes
+    std::vector<uint8_t> hash_output(64);
     config_.system->log(platform::System::LogLevel::Debug, "[BleTransport] Calculating Setup Hash for: " + input);
     
     if (config_.crypto == nullptr) {
@@ -403,9 +403,6 @@ void BleTransport::update_advertising() {
          config_.system->log(platform::System::LogLevel::Warning, "[BleTransport] Invalid Device ID format: " + config_.accessory_id);
     }
 
-    // Get/Initialize GSN (Global State Number)
-    // Per Spec 7.4.1.8: 16-bit monotonically increasing value, range 1-65535, wraps to 1
-    // Must persist across reboots, reset on factory reset or firmware update
     uint16_t gsn = 1;
     auto gsn_bytes = config_.storage->get("gsn");
     if (gsn_bytes && gsn_bytes->size() == 2) {
@@ -417,7 +414,6 @@ void BleTransport::update_advertising() {
         config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Initialized GSN to 1");
     }
 
-    // Get Configuration Number from storage (dynamically updated by AccessoryServer)
     uint16_t config_number = 1;
     auto cn_bytes = config_.storage->get("config_number");
     if (cn_bytes && !cn_bytes->empty()) {
@@ -829,7 +825,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         opcode == PDUOpcode::CharacteristicTimedWrite ||
         opcode == PDUOpcode::CharacteristicConfiguration ||
         opcode == PDUOpcode::ProtocolConfiguration) {
-        body_offset = 7; // Skip BodyLen field for Write operations
+        body_offset = 7;
     }
     
     std::span<const uint8_t> body;
@@ -837,7 +833,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         body = std::span<const uint8_t>(state.buffer.data() + body_offset, state.buffer.size() - body_offset);
     }
     
-    if (opcode == PDUOpcode::CharacteristicRead) { // 0x03
+    if (opcode == PDUOpcode::CharacteristicRead) {
         
         std::vector<uint8_t> value_bytes;
         uint8_t status = 0x00;
@@ -876,7 +872,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         
         send_response(connection_id, state.transaction_id, state.target_uuid, status, value_bytes);
     }
-    else if (opcode == PDUOpcode::CharacteristicWrite) { // 0x02
+    else if (opcode == PDUOpcode::CharacteristicWrite) {
         uint8_t status = 0x00;
         std::vector<uint8_t> response_body;
 
@@ -956,7 +952,6 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                  auto body_tlvs = core::TLV8::parse(std::vector<uint8_t>(body.begin(), body.end()));
                  auto value_tlv = core::TLV8::find(body_tlvs, 0x01);
                  if (value_tlv && !value_tlv->empty()) {
-                     // Convert raw bytes to Value based on characteristic format
                      core::Value new_value;
                      switch (ch->format()) {
                          case core::Format::Bool:
@@ -1022,10 +1017,10 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         
         send_response(connection_id, state.transaction_id, state.target_uuid, status, response_body);
     }
-    else if (opcode == PDUOpcode::CharacteristicTimedWrite) { // 0x04
+    else if (opcode == PDUOpcode::CharacteristicTimedWrite) {
         state.timed_write_body.assign(body.begin(), body.end());
         state.timed_write_iid = iid;
-        state.target_uuid = state.target_uuid; // Keep for ExecuteWrite
+        state.target_uuid = state.target_uuid;
         
         config_.system->log(platform::System::LogLevel::Info,
             "[BleTransport] Timed Write stored for IID=" + std::to_string(iid) + 
@@ -1033,7 +1028,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         
         send_response(connection_id, state.transaction_id, state.target_uuid, 0x00, {});
     }
-    else if (opcode == PDUOpcode::CharacteristicExecuteWrite) { // 0x05
+    else if (opcode == PDUOpcode::CharacteristicExecuteWrite) {
         uint8_t status = 0x00;
         std::vector<uint8_t> response_body;
         
@@ -1110,7 +1105,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         
         send_response(connection_id, state.transaction_id, state.target_uuid, status, response_body);
     }
-    else if (opcode == PDUOpcode::CharacteristicConfiguration) { // 0x07
+    else if (opcode == PDUOpcode::CharacteristicConfiguration) {
         // HAP-Characteristic-Configuration-Request/Response
         // Per Spec 7.3.4.14-15, Table 7-28, 7-29, 7-30
         
