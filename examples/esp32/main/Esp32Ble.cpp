@@ -1,4 +1,5 @@
 #include "Esp32Ble.hpp"
+#include "esp_log_buffer.h"
 #include <esp_log.h>
 #include <esp_bt.h>
 #if CONFIG_IDF_TARGET_ESP32
@@ -25,7 +26,7 @@ static uint32_t pending_adv_interval = 0;
 static uint32_t last_adv_interval = 20;
 
 static void parse_uuid(const std::string& uuid_str, ble_uuid_any_t* uuid) {
-    ESP_LOGI(TAG, "Parsing UUID: %s", uuid_str.c_str());
+    ESP_LOGD(TAG, "Parsing UUID: %s", uuid_str.c_str());
     
     std::string clean;
     for (char c : uuid_str) {
@@ -70,13 +71,13 @@ void Esp32Ble::init() {
         char buf[BLE_UUID_STR_LEN];
         switch (ctxt->op) {
             case BLE_GATT_REGISTER_OP_SVC:
-                ESP_LOGI(TAG, "Reg Service: %s, handle=%d", ble_uuid_to_str(ctxt->svc.svc_def->uuid, buf), ctxt->svc.handle);
+                ESP_LOGD(TAG, "Reg Service: %s, handle=%d", ble_uuid_to_str(ctxt->svc.svc_def->uuid, buf), ctxt->svc.handle);
                 break;
             case BLE_GATT_REGISTER_OP_CHR:
-                ESP_LOGI(TAG, "Reg Char: %s, val_handle=%d", ble_uuid_to_str(ctxt->chr.chr_def->uuid, buf), ctxt->chr.val_handle);
+                ESP_LOGD(TAG, "Reg Char: %s, val_handle=%d", ble_uuid_to_str(ctxt->chr.chr_def->uuid, buf), ctxt->chr.val_handle);
                 break;
             case BLE_GATT_REGISTER_OP_DSC:
-                ESP_LOGI(TAG, "Reg Desc: %s, handle=%d", ble_uuid_to_str(ctxt->dsc.dsc_def->uuid, buf), ctxt->dsc.handle);
+                ESP_LOGD(TAG, "Reg Desc: %s, handle=%d", ble_uuid_to_str(ctxt->dsc.dsc_def->uuid, buf), ctxt->dsc.handle);
                 break;
         }
     };
@@ -195,10 +196,10 @@ int Esp32Ble::gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle, st
     if (!ctx) return BLE_ATT_ERR_UNLIKELY;
 
      if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
-         ESP_LOGI(TAG, "GATT Read: %s", ctx->uuid.c_str());
+         ESP_LOGD(TAG, "GATT Read: %s", ctx->uuid.c_str());
          if (ctx->on_read) {
              auto data = ctx->on_read(conn_handle);
-             ESP_LOGI(TAG, "  -> Returning %d bytes", (int)data.size());
+             ESP_LOGD(TAG, "  -> Returning %d bytes", (int)data.size());
              int rc = os_mbuf_append(ctxt->om, data.data(), data.size());
              return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
          }
@@ -208,9 +209,9 @@ int Esp32Ble::gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle, st
              data.resize(OS_MBUF_PKTLEN(ctxt->om));
              int rc = os_mbuf_copydata(ctxt->om, 0, data.size(), data.data());
              
-             ESP_LOGI(TAG, "GATT Write: %s, len=%d", ctx->uuid.c_str(), (int)data.size());
+             ESP_LOGD(TAG, "GATT Write: %s, len=%d", ctx->uuid.c_str(), (int)data.size());
              if (data.size() < 20) {
-                 ESP_LOG_BUFFER_HEX(TAG, data.data(), data.size());
+                 ESP_LOG_BUFFER_HEX_LEVEL(TAG, data.data(), data.size(), ESP_LOG_DEBUG);
              }
              
              if (rc == 0) {
@@ -228,7 +229,7 @@ int Esp32Ble::gatt_svr_dsc_access(uint16_t conn_handle, uint16_t attr_handle, st
     if (!ctx) return BLE_ATT_ERR_UNLIKELY;
 
     if (ctxt->op == BLE_GATT_ACCESS_OP_READ_DSC) {
-        ESP_LOGI(TAG, "GATT Desc Read: %s", ctx->uuid.c_str());
+        ESP_LOGD(TAG, "GATT Desc Read: %s", ctx->uuid.c_str());
         if (ctx->on_read) {
             auto data = ctx->on_read(conn_handle);
             int rc = os_mbuf_append(ctxt->om, data.data(), data.size());
@@ -249,7 +250,7 @@ int Esp32Ble::gatt_svr_dsc_access(uint16_t conn_handle, uint16_t attr_handle, st
 }
 
 void Esp32Ble::register_service(const ServiceDefinition& service) {
-    printf("DEBUG: register_service called for UUID: %s\n", service.uuid.c_str());
+    ESP_LOGD(TAG, "register_service called for UUID: %s", service.uuid.c_str());
     auto svcs = new struct ble_gatt_svc_def[2];
     memset(svcs, 0, sizeof(struct ble_gatt_svc_def) * 2);
 
@@ -325,13 +326,13 @@ void Esp32Ble::register_service(const ServiceDefinition& service) {
     nim_services.push_back(svcs);
     
     int rc = ble_gatts_count_cfg(svcs);
-    if (rc != 0) printf("ERROR: ble_gatts_count_cfg failed: %d\n", rc);
+    if (rc != 0) ESP_LOGE(TAG, "ble_gatts_count_cfg failed: %d", rc);
     
     rc = ble_gatts_add_svcs(svcs);
     if (rc != 0) {
-        printf("ERROR: ble_gatts_add_svcs failed: %d\n", rc);
+        ESP_LOGE(TAG, "ble_gatts_add_svcs failed: %d", rc);
     } else {
-        printf("DEBUG: ble_gatts_add_svcs success\n");
+        ESP_LOGD(TAG, "ble_gatts_add_svcs success");
     }
 }
 

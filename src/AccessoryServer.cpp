@@ -383,7 +383,7 @@ void AccessoryServer::on_tcp_receive(uint32_t connection_id, std::span<const uin
         auto request = parser.take_request();
         parser.reset();
         
-        config_.system->log(platform::System::LogLevel::Info, 
+        config_.system->log(platform::System::LogLevel::Debug,
             "[AccessoryServer] HTTP Request: " + method_to_string(request.method) + " " + request.path);
         
         // Log headers
@@ -415,7 +415,7 @@ void AccessoryServer::on_tcp_receive(uint32_t connection_id, std::span<const uin
         transport::Response final_response;
         if (response) {
             final_response = *response;
-            config_.system->log(platform::System::LogLevel::Info, 
+            config_.system->log(platform::System::LogLevel::Debug, 
                 "[AccessoryServer] HTTP Response: " + std::to_string(static_cast<int>(final_response.status)));
             
             // Log headers
