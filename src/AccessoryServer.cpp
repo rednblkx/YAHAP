@@ -89,6 +89,7 @@ AccessoryServer::AccessoryServer(Config config) : config_(std::move(config)), im
         ble_config.storage = config_.storage;
         ble_config.accessory_id = config_.accessory_id;
         ble_config.device_name = config_.device_name;
+        ble_config.category_id = static_cast<uint16_t>(config_.category_id);
         impl_->ble_transport = std::make_unique<transport::BleTransport>(ble_config);
     }
     
@@ -248,7 +249,7 @@ void AccessoryServer::update_mdns() {
     mdns_service.txt_records.push_back({"pv", "1.1"}); // Protocol version
     mdns_service.txt_records.push_back({"s#", "1"}); // State number
     mdns_service.txt_records.push_back({"sf", sf_val}); // Status flags (1 = discoverable/unpaired, 0 = paired)
-    mdns_service.txt_records.push_back({"ci", "5"}); // Category identifier (5 = Lightbulb)
+    mdns_service.txt_records.push_back({"ci", std::to_string(static_cast<uint16_t>(config_.category_id))}); // Category identifier
     mdns_service.txt_records.push_back({"ff", "0"}); // Feature flags
     
     // Use update instead of re-register if already registered

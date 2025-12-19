@@ -7,6 +7,7 @@
 #include "hap/platform/System.hpp"
 #include "hap/platform/Ble.hpp"
 #include "hap/transport/HTTP.hpp"
+#include "hap/types/ServiceTypes.hpp"
 
 #include <memory>
 #include <string>
@@ -30,6 +31,7 @@ public:
         std::string setup_code;        // 8-digit PIN (e.g., "123-45-678")
         std::string device_name;       // e.g., "My Lightbulb"
         uint16_t port = 8080;          // TCP port for HAP over IP
+        service::AccessoryCategory category_id = service::AccessoryCategory::Lightbulb;
         
         std::function<void()> on_identify;
     };
