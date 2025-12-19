@@ -32,13 +32,13 @@ std::shared_ptr<Characteristic> AccessoryFlags() {
 }
 
 std::shared_ptr<Characteristic> FirmwareRevision() {
-    auto c = std::make_shared<Characteristic>(kType_FirmwareRevision, Format::String, PERM_PR_PW);
+    auto c = std::make_shared<Characteristic>(kType_FirmwareRevision, Format::String, PERM_PR);
     c->set_value(std::string("1.0.0"));
     return c;
 }
 
 std::shared_ptr<Characteristic> HardwareRevision() {
-    auto c = std::make_shared<Characteristic>(kType_HardwareRevision, Format::String, PERM_PR_PW);
+    auto c = std::make_shared<Characteristic>(kType_HardwareRevision, Format::String, PERM_PR);
     c->set_value(std::string("1.0.0"));
     return c;
 }
@@ -50,28 +50,28 @@ std::shared_ptr<Characteristic> Identify() {
 }
 
 std::shared_ptr<Characteristic> Manufacturer() {
-    auto c = std::make_shared<Characteristic>(kType_Manufacturer, Format::String, PERM_PR_PW);
+    auto c = std::make_shared<Characteristic>(kType_Manufacturer, Format::String, PERM_PR);
     c->set_max_len(64);
     c->set_value(std::string(""));
     return c;
 }
 
 std::shared_ptr<Characteristic> Model() {
-    auto c = std::make_shared<Characteristic>(kType_Model, Format::String, PERM_PR_PW);
+    auto c = std::make_shared<Characteristic>(kType_Model, Format::String, PERM_PR);
     c->set_max_len(64);
     c->set_value(std::string(""));
     return c;
 }
 
 std::shared_ptr<Characteristic> Name() {
-    auto c = std::make_shared<Characteristic>(kType_Name, Format::String, PERM_PR_PW);
+    auto c = std::make_shared<Characteristic>(kType_Name, Format::String, PERM_PR);
     c->set_max_len(64);
     c->set_value(std::string(""));
     return c;
 }
 
 std::shared_ptr<Characteristic> SerialNumber() {
-    auto c = std::make_shared<Characteristic>(kType_SerialNumber, Format::String, PERM_PR_PW);
+    auto c = std::make_shared<Characteristic>(kType_SerialNumber, Format::String, PERM_PR);
     c->set_max_len(64);
     c->set_value(std::string(""));
     return c;
