@@ -30,46 +30,54 @@ namespace hap::service {
 // Service UUID Type Constants (HAP Spec R13 Section 9)
 //==============================================================================
 
-constexpr uint64_t kType_AccessoryInformation = 0x3E;
-constexpr uint64_t kType_GarageDoorOpener = 0x41;
-constexpr uint64_t kType_LightBulb = 0x43;
-constexpr uint64_t kType_LockManagement = 0x44;
-constexpr uint64_t kType_LockMechanism = 0x45;
-constexpr uint64_t kType_Outlet = 0x47;
-constexpr uint64_t kType_Switch = 0x49;
-constexpr uint64_t kType_Thermostat = 0x4A;
-constexpr uint64_t kType_Pairing = 0x55;
-constexpr uint64_t kType_SecuritySystem = 0x7E;
-constexpr uint64_t kType_CarbonMonoxideSensor = 0x7F;
-constexpr uint64_t kType_ContactSensor = 0x80;
-constexpr uint64_t kType_Door = 0x81;
-constexpr uint64_t kType_HumiditySensor = 0x82;
-constexpr uint64_t kType_LeakSensor = 0x83;
-constexpr uint64_t kType_LightSensor = 0x84;
-constexpr uint64_t kType_MotionSensor = 0x85;
-constexpr uint64_t kType_OccupancySensor = 0x86;
-constexpr uint64_t kType_SmokeSensor = 0x87;
-constexpr uint64_t kType_StatelessProgrammableSwitch = 0x89;
-constexpr uint64_t kType_TemperatureSensor = 0x8A;
-constexpr uint64_t kType_Window = 0x8B;
-constexpr uint64_t kType_WindowCovering = 0x8C;
-constexpr uint64_t kType_AirQualitySensor = 0x8D;
-constexpr uint64_t kType_BatteryService = 0x96;
-constexpr uint64_t kType_CarbonDioxideSensor = 0x97;
-constexpr uint64_t kType_HAPProtocolInformation = 0xA2;
-constexpr uint64_t kType_Fan = 0xB7;
-constexpr uint64_t kType_Slat = 0xB9;
-constexpr uint64_t kType_FilterMaintenance = 0xBA;
-constexpr uint64_t kType_AirPurifier = 0xBB;
-constexpr uint64_t kType_HeaterCooler = 0xBC;
-constexpr uint64_t kType_HumidifierDehumidifier = 0xBD;
-constexpr uint64_t kType_ServiceLabel = 0xCC;
-constexpr uint64_t kType_IrrigationSystem = 0xCF;
-constexpr uint64_t kType_Valve = 0xD0;
-constexpr uint64_t kType_Faucet = 0xD7;
-constexpr uint64_t kType_CameraRTPStreamManagement = 0x110;
-constexpr uint64_t kType_Microphone = 0x112;
-constexpr uint64_t kType_Speaker = 0x113;
+constexpr uint64_t kType_AccessoryInformation = 0x3E;       // 9.1
+constexpr uint64_t kType_Fan = 0x40;                        // 9.3 - Legacy Fan (requires On)
+constexpr uint64_t kType_GarageDoorOpener = 0x41;           // 9.4
+constexpr uint64_t kType_LightBulb = 0x43;                  // 9.5
+constexpr uint64_t kType_LockManagement = 0x44;             // 9.6
+constexpr uint64_t kType_LockMechanism = 0x45;              // 9.7
+constexpr uint64_t kType_Outlet = 0x47;                     // 9.8
+constexpr uint64_t kType_Switch = 0x49;                     // 9.9
+constexpr uint64_t kType_Thermostat = 0x4A;                 // 9.10
+constexpr uint64_t kType_Pairing = 0x55;                    // 5.13.1
+constexpr uint64_t kType_SecuritySystem = 0x7E;             // 9.12
+constexpr uint64_t kType_CarbonMonoxideSensor = 0x7F;       // 9.13
+constexpr uint64_t kType_ContactSensor = 0x80;              // 9.14
+constexpr uint64_t kType_Door = 0x81;                       // 9.15
+constexpr uint64_t kType_HumiditySensor = 0x82;             // 9.16
+constexpr uint64_t kType_LeakSensor = 0x83;                 // 9.17
+constexpr uint64_t kType_LightSensor = 0x84;                // 9.18
+constexpr uint64_t kType_MotionSensor = 0x85;               // 9.19
+constexpr uint64_t kType_OccupancySensor = 0x86;            // 9.20
+constexpr uint64_t kType_SmokeSensor = 0x87;                // 9.21
+constexpr uint64_t kType_StatelessProgrammableSwitch = 0x89; // 9.22
+constexpr uint64_t kType_TemperatureSensor = 0x8A;          // 9.23
+constexpr uint64_t kType_Window = 0x8B;                     // 9.24
+constexpr uint64_t kType_WindowCovering = 0x8C;             // 9.25
+constexpr uint64_t kType_AirQualitySensor = 0x8D;           // 9.11
+constexpr uint64_t kType_BatteryService = 0x96;             // 9.26
+constexpr uint64_t kType_CarbonDioxideSensor = 0x97;        // 9.27
+constexpr uint64_t kType_HAPProtocolInformation = 0xA2;     // 9.2
+constexpr uint64_t kType_Fan_v2 = 0xB7;                     // 9.32 - Fan v2 (requires Active)
+constexpr uint64_t kType_Slat = 0xB9;                       // 9.33
+constexpr uint64_t kType_FilterMaintenance = 0xBA;          // 9.34
+constexpr uint64_t kType_AirPurifier = 0xBB;                // 9.35
+constexpr uint64_t kType_HeaterCooler = 0xBC;               // 9.36
+constexpr uint64_t kType_HumidifierDehumidifier = 0xBD;     // 9.37
+constexpr uint64_t kType_ServiceLabel = 0xCC;               // 9.38
+constexpr uint64_t kType_IrrigationSystem = 0xCF;           // 9.39
+constexpr uint64_t kType_Valve = 0xD0;                      // 9.40
+constexpr uint64_t kType_Faucet = 0xD7;                     // 9.41
+constexpr uint64_t kType_CameraRTPStreamManagement = 0x110; // 9.28
+constexpr uint64_t kType_Microphone = 0x112;                // 9.29
+constexpr uint64_t kType_Speaker = 0x113;                   // 9.30
+constexpr uint64_t kType_Doorbell = 0x121;                  // 9.31
+constexpr uint64_t kType_TargetControlManagement = 0x122;   // 9.42
+constexpr uint64_t kType_TargetControl = 0x125;             // 9.43
+constexpr uint64_t kType_AudioStreamManagement = 0x127;     // 9.44
+constexpr uint64_t kType_DataStreamTransportManagement = 0x129; // 9.45
+constexpr uint64_t kType_Siri = 0x133;                      // 9.46
+
 
 //==============================================================================
 // Accessory Category Constants (HAP Spec R13 Section 13.2)
@@ -407,6 +415,45 @@ private:
 };
 
 //==============================================================================
+// Lock Management Service Builder
+// Required: LockControlPoint, Version
+// Optional: Logs, AudioFeedback, LockManagementAutoSecurityTimeout,
+//           AdministratorOnlyAccess, LockLastKnownAction, CurrentDoorState, MotionDetected
+//==============================================================================
+
+class LockManagementBuilder : public ServiceBuilderBase {
+public:
+    LockManagementBuilder();
+    
+    /// Add optional audio feedback characteristic
+    LockManagementBuilder& with_audio_feedback();
+    
+    /// Add optional auto security timeout characteristic
+    LockManagementBuilder& with_auto_security_timeout();
+    
+    /// Add optional lock last known action characteristic
+    LockManagementBuilder& with_last_known_action();
+    
+    /// Add optional logs characteristic
+    LockManagementBuilder& with_logs();
+    
+    /// Set callback for Lock Control Point writes
+    LockManagementBuilder& on_control_point(std::function<void(const std::vector<uint8_t>& tlv)> callback);
+    
+    std::shared_ptr<core::Service> build();
+    std::shared_ptr<core::Characteristic> lock_control_point() { return lock_control_point_; }
+    std::shared_ptr<core::Characteristic> version() { return version_; }
+
+private:
+    std::shared_ptr<core::Characteristic> lock_control_point_;
+    std::shared_ptr<core::Characteristic> version_;
+    std::shared_ptr<core::Characteristic> auto_security_timeout_;
+    std::shared_ptr<core::Characteristic> last_known_action_;
+    std::shared_ptr<core::Characteristic> audio_feedback_;
+    std::shared_ptr<core::Characteristic> logs_;
+};
+
+//==============================================================================
 // Fan Service Builder
 // Required: Active
 // Optional: CurrentFanState, TargetFanState, RotationDirection, RotationSpeed,
@@ -502,6 +549,461 @@ public:
 private:
     std::shared_ptr<core::Characteristic> current_state_;
     std::shared_ptr<core::Characteristic> target_state_;
+};
+
+//==============================================================================
+// Door Service Builder (9.15)
+// Required: CurrentPosition, TargetPosition, PositionState
+// Optional: Name, HoldPosition, ObstructionDetected
+//==============================================================================
+
+class DoorBuilder : public ServiceBuilderBase {
+public:
+    DoorBuilder();
+    
+    DoorBuilder& with_name(std::string name);
+    DoorBuilder& with_hold_position();
+    DoorBuilder& with_obstruction_detected();
+    
+    std::shared_ptr<core::Service> build();
+    std::shared_ptr<core::Characteristic> current_position() { return current_position_; }
+    std::shared_ptr<core::Characteristic> target_position() { return target_position_; }
+
+private:
+    std::shared_ptr<core::Characteristic> current_position_;
+    std::shared_ptr<core::Characteristic> target_position_;
+    std::shared_ptr<core::Characteristic> position_state_;
+};
+
+//==============================================================================
+// Occupancy Sensor Service Builder (9.20)
+// Required: OccupancyDetected
+// Optional: Name, StatusActive, StatusFault, StatusTampered, StatusLowBattery
+//==============================================================================
+
+class OccupancySensorBuilder : public ServiceBuilderBase {
+public:
+    OccupancySensorBuilder();
+    
+    OccupancySensorBuilder& with_name(std::string name);
+    OccupancySensorBuilder& with_status_active();
+    OccupancySensorBuilder& with_battery_status();
+    
+    std::shared_ptr<core::Service> build();
+    std::shared_ptr<core::Characteristic> occupancy_detected() { return occupancy_detected_; }
+
+private:
+    std::shared_ptr<core::Characteristic> occupancy_detected_;
+};
+
+//==============================================================================
+// Smoke Sensor Service Builder (9.21)
+// Required: SmokeDetected
+// Optional: Name, StatusActive, StatusFault, StatusTampered, StatusLowBattery
+//==============================================================================
+
+class SmokeSensorBuilder : public ServiceBuilderBase {
+public:
+    SmokeSensorBuilder();
+    
+    SmokeSensorBuilder& with_name(std::string name);
+    SmokeSensorBuilder& with_status_active();
+    SmokeSensorBuilder& with_battery_status();
+    
+    std::shared_ptr<core::Service> build();
+    std::shared_ptr<core::Characteristic> smoke_detected() { return smoke_detected_; }
+
+private:
+    std::shared_ptr<core::Characteristic> smoke_detected_;
+};
+
+//==============================================================================
+// Leak Sensor Service Builder (9.17)
+// Required: LeakDetected
+// Optional: Name, StatusActive, StatusFault, StatusTampered, StatusLowBattery
+//==============================================================================
+
+class LeakSensorBuilder : public ServiceBuilderBase {
+public:
+    LeakSensorBuilder();
+    
+    LeakSensorBuilder& with_name(std::string name);
+    LeakSensorBuilder& with_status_active();
+    LeakSensorBuilder& with_battery_status();
+    
+    std::shared_ptr<core::Service> build();
+    std::shared_ptr<core::Characteristic> leak_detected() { return leak_detected_; }
+
+private:
+    std::shared_ptr<core::Characteristic> leak_detected_;
+};
+
+//==============================================================================
+// Light Sensor Service Builder (9.18)
+// Required: CurrentAmbientLightLevel
+// Optional: Name, StatusActive, StatusFault, StatusTampered, StatusLowBattery
+//==============================================================================
+
+class LightSensorBuilder : public ServiceBuilderBase {
+public:
+    LightSensorBuilder();
+    
+    LightSensorBuilder& with_name(std::string name);
+    LightSensorBuilder& with_status_active();
+    LightSensorBuilder& with_battery_status();
+    
+    std::shared_ptr<core::Service> build();
+    std::shared_ptr<core::Characteristic> current_light_level() { return current_light_level_; }
+
+private:
+    std::shared_ptr<core::Characteristic> current_light_level_;
+};
+
+//==============================================================================
+// Carbon Dioxide Sensor Service Builder (9.27)
+// Required: CarbonDioxideDetected
+// Optional: Name, StatusActive, StatusFault, StatusTampered, StatusLowBattery,
+//           CarbonDioxideLevel, CarbonDioxidePeakLevel
+//==============================================================================
+
+class CarbonDioxideSensorBuilder : public ServiceBuilderBase {
+public:
+    CarbonDioxideSensorBuilder();
+    
+    CarbonDioxideSensorBuilder& with_name(std::string name);
+    CarbonDioxideSensorBuilder& with_status_active();
+    CarbonDioxideSensorBuilder& with_level();
+    
+    std::shared_ptr<core::Service> build();
+    std::shared_ptr<core::Characteristic> co2_detected() { return co2_detected_; }
+
+private:
+    std::shared_ptr<core::Characteristic> co2_detected_;
+};
+
+//==============================================================================
+// Doorbell Service Builder (9.31)
+// Required: ProgrammableSwitchEvent
+// Optional: Name, Volume, Brightness
+//==============================================================================
+
+class DoorbellBuilder : public ServiceBuilderBase {
+public:
+    DoorbellBuilder();
+    
+    DoorbellBuilder& with_name(std::string name);
+    DoorbellBuilder& with_volume();
+    DoorbellBuilder& with_brightness();
+    
+    std::shared_ptr<core::Service> build();
+
+private:
+    std::shared_ptr<core::Characteristic> switch_event_;
+};
+
+//==============================================================================
+// Air Purifier Service Builder (9.35)
+// Required: Active, CurrentAirPurifierState, TargetAirPurifierState
+// Optional: Name, RotationSpeed, SwingMode, LockPhysicalControls
+//==============================================================================
+
+class AirPurifierBuilder : public ServiceBuilderBase {
+public:
+    AirPurifierBuilder();
+    
+    AirPurifierBuilder& with_name(std::string name);
+    AirPurifierBuilder& with_rotation_speed();
+    AirPurifierBuilder& with_swing_mode();
+    AirPurifierBuilder& with_lock_physical_controls();
+    
+    std::shared_ptr<core::Service> build();
+    std::shared_ptr<core::Characteristic> active() { return active_; }
+
+private:
+    std::shared_ptr<core::Characteristic> active_;
+    std::shared_ptr<core::Characteristic> current_state_;
+    std::shared_ptr<core::Characteristic> target_state_;
+};
+
+//==============================================================================
+// Heater Cooler Service Builder (9.36)
+// Required: Active, CurrentTemperature, CurrentHeaterCoolerState, TargetHeaterCoolerState
+// Optional: Name, RotationSpeed, TemperatureDisplayUnits, SwingMode,
+//           CoolingThresholdTemperature, HeatingThresholdTemperature, LockPhysicalControls
+//==============================================================================
+
+class HeaterCoolerBuilder : public ServiceBuilderBase {
+public:
+    HeaterCoolerBuilder();
+    
+    HeaterCoolerBuilder& with_name(std::string name);
+    HeaterCoolerBuilder& with_rotation_speed();
+    HeaterCoolerBuilder& with_cooling_threshold();
+    HeaterCoolerBuilder& with_heating_threshold();
+    HeaterCoolerBuilder& with_swing_mode();
+    
+    std::shared_ptr<core::Service> build();
+    std::shared_ptr<core::Characteristic> active() { return active_; }
+    std::shared_ptr<core::Characteristic> current_temperature() { return current_temp_; }
+
+private:
+    std::shared_ptr<core::Characteristic> active_;
+    std::shared_ptr<core::Characteristic> current_temp_;
+    std::shared_ptr<core::Characteristic> current_state_;
+    std::shared_ptr<core::Characteristic> target_state_;
+};
+
+//==============================================================================
+// Humidifier Dehumidifier Service Builder (9.37)
+// Required: Active, CurrentRelativeHumidity, CurrentHumidifierDehumidifierState,
+//           TargetHumidifierDehumidifierState
+// Optional: Name, RelativeHumidityDehumidifierThreshold, RelativeHumidityHumidifierThreshold,
+//           RotationSpeed, SwingMode, WaterLevel, LockPhysicalControls
+//==============================================================================
+
+class HumidifierDehumidifierBuilder : public ServiceBuilderBase {
+public:
+    HumidifierDehumidifierBuilder();
+    
+    HumidifierDehumidifierBuilder& with_name(std::string name);
+    HumidifierDehumidifierBuilder& with_dehumidifier_threshold();
+    HumidifierDehumidifierBuilder& with_humidifier_threshold();
+    HumidifierDehumidifierBuilder& with_water_level();
+    
+    std::shared_ptr<core::Service> build();
+    std::shared_ptr<core::Characteristic> active() { return active_; }
+
+private:
+    std::shared_ptr<core::Characteristic> active_;
+    std::shared_ptr<core::Characteristic> current_humidity_;
+    std::shared_ptr<core::Characteristic> current_state_;
+    std::shared_ptr<core::Characteristic> target_state_;
+};
+
+//==============================================================================
+// Filter Maintenance Service Builder (9.34)
+// Required: FilterChangeIndication
+// Optional: Name, FilterLifeLevel, ResetFilterIndication
+//==============================================================================
+
+class FilterMaintenanceBuilder : public ServiceBuilderBase {
+public:
+    FilterMaintenanceBuilder();
+    
+    FilterMaintenanceBuilder& with_name(std::string name);
+    FilterMaintenanceBuilder& with_filter_life_level();
+    FilterMaintenanceBuilder& with_reset_filter_indication();
+    
+    std::shared_ptr<core::Service> build();
+
+private:
+    std::shared_ptr<core::Characteristic> filter_change_;
+};
+
+//==============================================================================
+// Slat Service Builder (9.33)
+// Required: CurrentSlatState, SlatType
+// Optional: Name, SwingMode, CurrentTiltAngle, TargetTiltAngle
+//==============================================================================
+
+class SlatBuilder : public ServiceBuilderBase {
+public:
+    SlatBuilder();
+    
+    SlatBuilder& with_name(std::string name);
+    SlatBuilder& with_swing_mode();
+    SlatBuilder& with_tilt_angle();
+    
+    std::shared_ptr<core::Service> build();
+
+private:
+    std::shared_ptr<core::Characteristic> current_state_;
+    std::shared_ptr<core::Characteristic> slat_type_;
+};
+
+//==============================================================================
+// Valve Service Builder (9.40)
+// Required: Active, InUse, ValveType
+// Optional: SetDuration, RemainingDuration, IsConfigured, ServiceLabelIndex, StatusFault, Name
+//==============================================================================
+
+class ValveBuilder : public ServiceBuilderBase {
+public:
+    ValveBuilder();
+    
+    ValveBuilder& with_name(std::string name);
+    ValveBuilder& with_duration();
+    ValveBuilder& with_is_configured();
+    
+    std::shared_ptr<core::Service> build();
+    std::shared_ptr<core::Characteristic> active() { return active_; }
+    std::shared_ptr<core::Characteristic> in_use() { return in_use_; }
+
+private:
+    std::shared_ptr<core::Characteristic> active_;
+    std::shared_ptr<core::Characteristic> in_use_;
+    std::shared_ptr<core::Characteristic> valve_type_;
+};
+
+//==============================================================================
+// Irrigation System Service Builder (9.39)
+// Required: Active, ProgramMode, InUse
+// Optional: RemainingDuration, Name, StatusFault
+//==============================================================================
+
+class IrrigationSystemBuilder : public ServiceBuilderBase {
+public:
+    IrrigationSystemBuilder();
+    
+    IrrigationSystemBuilder& with_name(std::string name);
+    IrrigationSystemBuilder& with_remaining_duration();
+    
+    std::shared_ptr<core::Service> build();
+    std::shared_ptr<core::Characteristic> active() { return active_; }
+
+private:
+    std::shared_ptr<core::Characteristic> active_;
+    std::shared_ptr<core::Characteristic> program_mode_;
+    std::shared_ptr<core::Characteristic> in_use_;
+};
+
+//==============================================================================
+// Faucet Service Builder (9.41)
+// Required: Active
+// Optional: StatusFault, Name
+//==============================================================================
+
+class FaucetBuilder : public ServiceBuilderBase {
+public:
+    FaucetBuilder();
+    
+    FaucetBuilder& with_name(std::string name);
+    FaucetBuilder& with_status_fault();
+    
+    std::shared_ptr<core::Service> build();
+    std::shared_ptr<core::Characteristic> active() { return active_; }
+
+private:
+    std::shared_ptr<core::Characteristic> active_;
+};
+
+//==============================================================================
+// Service Label Service Builder (9.38)
+// Required: ServiceLabelNamespace
+//==============================================================================
+
+class ServiceLabelBuilder : public ServiceBuilderBase {
+public:
+    ServiceLabelBuilder();
+    
+    std::shared_ptr<core::Service> build();
+
+private:
+    std::shared_ptr<core::Characteristic> namespace_char_;
+};
+
+//==============================================================================
+// Carbon Monoxide Sensor Service Builder (9.13)
+// Required: CarbonMonoxideDetected
+// Optional: Name, StatusActive, StatusFault, StatusTampered, StatusLowBattery,
+//           CarbonMonoxideLevel, CarbonMonoxidePeakLevel
+//==============================================================================
+
+class CarbonMonoxideSensorBuilder : public ServiceBuilderBase {
+public:
+    CarbonMonoxideSensorBuilder();
+    
+    CarbonMonoxideSensorBuilder& with_name(std::string name);
+    CarbonMonoxideSensorBuilder& with_status_active();
+    CarbonMonoxideSensorBuilder& with_level();
+    
+    std::shared_ptr<core::Service> build();
+    std::shared_ptr<core::Characteristic> co_detected() { return co_detected_; }
+
+private:
+    std::shared_ptr<core::Characteristic> co_detected_;
+};
+
+//==============================================================================
+// Air Quality Sensor Service Builder (9.11)
+// Required: AirQuality
+// Optional: Name, OzoneDensity, NitrogenDioxideDensity, SulphurDioxideDensity,
+//           PM2.5Density, PM10Density, VOCDensity, StatusActive, StatusFault,
+//           StatusTampered, StatusLowBattery
+//==============================================================================
+
+class AirQualitySensorBuilder : public ServiceBuilderBase {
+public:
+    AirQualitySensorBuilder();
+    
+    AirQualitySensorBuilder& with_name(std::string name);
+    AirQualitySensorBuilder& with_pm25();
+    AirQualitySensorBuilder& with_pm10();
+    AirQualitySensorBuilder& with_voc();
+    AirQualitySensorBuilder& with_status_active();
+    
+    std::shared_ptr<core::Service> build();
+    std::shared_ptr<core::Characteristic> air_quality() { return air_quality_; }
+
+private:
+    std::shared_ptr<core::Characteristic> air_quality_;
+};
+
+//==============================================================================
+// Stateless Programmable Switch Service Builder (9.22)
+// Required: ProgrammableSwitchEvent
+// Optional: Name, ServiceLabelIndex
+//==============================================================================
+
+class StatelessProgrammableSwitchBuilder : public ServiceBuilderBase {
+public:
+    StatelessProgrammableSwitchBuilder();
+    
+    StatelessProgrammableSwitchBuilder& with_name(std::string name);
+    StatelessProgrammableSwitchBuilder& with_service_label_index(uint8_t index);
+    
+    std::shared_ptr<core::Service> build();
+
+private:
+    std::shared_ptr<core::Characteristic> switch_event_;
+};
+
+//==============================================================================
+// Microphone Service Builder (9.29)
+// Required: Mute
+// Optional: Name, Volume
+//==============================================================================
+
+class MicrophoneBuilder : public ServiceBuilderBase {
+public:
+    MicrophoneBuilder();
+    
+    MicrophoneBuilder& with_name(std::string name);
+    MicrophoneBuilder& with_volume();
+    
+    std::shared_ptr<core::Service> build();
+
+private:
+    std::shared_ptr<core::Characteristic> mute_;
+};
+
+//==============================================================================
+// Speaker Service Builder (9.30)
+// Required: Mute
+// Optional: Name, Volume
+//==============================================================================
+
+class SpeakerBuilder : public ServiceBuilderBase {
+public:
+    SpeakerBuilder();
+    
+    SpeakerBuilder& with_name(std::string name);
+    SpeakerBuilder& with_volume();
+    
+    std::shared_ptr<core::Service> build();
+
+private:
+    std::shared_ptr<core::Characteristic> mute_;
 };
 
 } // namespace hap::service

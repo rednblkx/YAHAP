@@ -464,11 +464,73 @@ std::shared_ptr<Service> LockMechanismBuilder::build() {
 }
 
 //==============================================================================
+// LockManagementBuilder (9.6) - MANDATORY for Lock Profile per HAP Spec 11.2
+//==============================================================================
+
+LockManagementBuilder::LockManagementBuilder() {
+    service_ = std::make_shared<Service>(kType_LockManagement, "Lock Management");
+    
+    // Required characteristics
+    lock_control_point_ = chr::LockControlPoint();
+    version_ = chr::Version();
+    version_->set_value(std::string("1.0")); // HAP Spec 11.2.2.2 requires "1.0"
+    
+    add_characteristic(lock_control_point_);
+    add_characteristic(version_);
+}
+
+LockManagementBuilder& LockManagementBuilder::with_audio_feedback() {
+    if (!audio_feedback_) {
+        audio_feedback_ = chr::AudioFeedback();
+        add_characteristic(audio_feedback_);
+    }
+    return *this;
+}
+
+LockManagementBuilder& LockManagementBuilder::with_auto_security_timeout() {
+    if (!auto_security_timeout_) {
+        auto_security_timeout_ = chr::LockManagementAutoSecurityTimeout();
+        add_characteristic(auto_security_timeout_);
+    }
+    return *this;
+}
+
+LockManagementBuilder& LockManagementBuilder::with_last_known_action() {
+    if (!last_known_action_) {
+        last_known_action_ = chr::LockLastKnownAction();
+        add_characteristic(last_known_action_);
+    }
+    return *this;
+}
+
+LockManagementBuilder& LockManagementBuilder::with_logs() {
+    if (!logs_) {
+        logs_ = chr::Logs();
+        add_characteristic(logs_);
+    }
+    return *this;
+}
+
+LockManagementBuilder& LockManagementBuilder::on_control_point(std::function<void(const std::vector<uint8_t>& tlv)> callback) {
+    lock_control_point_->set_write_callback([callback](const Value& v) {
+        if (callback) {
+            auto& tlv_data = std::get<std::vector<uint8_t>>(v);
+            callback(tlv_data);
+        }
+    });
+    return *this;
+}
+
+std::shared_ptr<Service> LockManagementBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
 // FanBuilder
 //==============================================================================
 
 FanBuilder::FanBuilder() {
-    service_ = std::make_shared<Service>(kType_Fan, "Fan");
+    service_ = std::make_shared<Service>(kType_Fan_v2, "Fan");
     active_char_ = chr::ActiveChar();
     add_characteristic(active_char_);
 }
@@ -622,6 +684,709 @@ SecuritySystemBuilder& SecuritySystemBuilder::with_fault_status() {
 }
 
 std::shared_ptr<Service> SecuritySystemBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Door Service Builder (9.15)
+//==============================================================================
+
+DoorBuilder::DoorBuilder() {
+    service_ = std::make_shared<Service>(kType_Door, "Door");
+    
+    current_position_ = chr::CurrentPosition();
+    target_position_ = chr::TargetPosition();
+    position_state_ = chr::PositionStateChar();
+    
+    add_characteristic(current_position_);
+    add_characteristic(target_position_);
+    add_characteristic(position_state_);
+}
+
+DoorBuilder& DoorBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+DoorBuilder& DoorBuilder::with_hold_position() {
+    add_characteristic(chr::HoldPositionChar());
+    return *this;
+}
+
+DoorBuilder& DoorBuilder::with_obstruction_detected() {
+    add_characteristic(chr::ObstructionDetected());
+    return *this;
+}
+
+std::shared_ptr<Service> DoorBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Occupancy Sensor Service Builder (9.20)
+//==============================================================================
+
+OccupancySensorBuilder::OccupancySensorBuilder() {
+    service_ = std::make_shared<Service>(kType_OccupancySensor, "Occupancy Sensor");
+    
+    occupancy_detected_ = chr::OccupancyDetected();
+    add_characteristic(occupancy_detected_);
+}
+
+OccupancySensorBuilder& OccupancySensorBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+OccupancySensorBuilder& OccupancySensorBuilder::with_status_active() {
+    add_characteristic(chr::StatusActive());
+    return *this;
+}
+
+OccupancySensorBuilder& OccupancySensorBuilder::with_battery_status() {
+    add_characteristic(chr::StatusLowBatteryChar());
+    return *this;
+}
+
+std::shared_ptr<Service> OccupancySensorBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Smoke Sensor Service Builder (9.21)
+//==============================================================================
+
+SmokeSensorBuilder::SmokeSensorBuilder() {
+    service_ = std::make_shared<Service>(kType_SmokeSensor, "Smoke Sensor");
+    
+    smoke_detected_ = chr::SmokeDetected();
+    add_characteristic(smoke_detected_);
+}
+
+SmokeSensorBuilder& SmokeSensorBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+SmokeSensorBuilder& SmokeSensorBuilder::with_status_active() {
+    add_characteristic(chr::StatusActive());
+    return *this;
+}
+
+SmokeSensorBuilder& SmokeSensorBuilder::with_battery_status() {
+    add_characteristic(chr::StatusLowBatteryChar());
+    return *this;
+}
+
+std::shared_ptr<Service> SmokeSensorBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Leak Sensor Service Builder (9.17)
+//==============================================================================
+
+LeakSensorBuilder::LeakSensorBuilder() {
+    service_ = std::make_shared<Service>(kType_LeakSensor, "Leak Sensor");
+    
+    leak_detected_ = chr::LeakDetected();
+    add_characteristic(leak_detected_);
+}
+
+LeakSensorBuilder& LeakSensorBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+LeakSensorBuilder& LeakSensorBuilder::with_status_active() {
+    add_characteristic(chr::StatusActive());
+    return *this;
+}
+
+LeakSensorBuilder& LeakSensorBuilder::with_battery_status() {
+    add_characteristic(chr::StatusLowBatteryChar());
+    return *this;
+}
+
+std::shared_ptr<Service> LeakSensorBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Light Sensor Service Builder (9.18)
+//==============================================================================
+
+LightSensorBuilder::LightSensorBuilder() {
+    service_ = std::make_shared<Service>(kType_LightSensor, "Light Sensor");
+    
+    current_light_level_ = chr::CurrentAmbientLightLevel();
+    add_characteristic(current_light_level_);
+}
+
+LightSensorBuilder& LightSensorBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+LightSensorBuilder& LightSensorBuilder::with_status_active() {
+    add_characteristic(chr::StatusActive());
+    return *this;
+}
+
+LightSensorBuilder& LightSensorBuilder::with_battery_status() {
+    add_characteristic(chr::StatusLowBatteryChar());
+    return *this;
+}
+
+std::shared_ptr<Service> LightSensorBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Carbon Dioxide Sensor Service Builder (9.27)
+//==============================================================================
+
+CarbonDioxideSensorBuilder::CarbonDioxideSensorBuilder() {
+    service_ = std::make_shared<Service>(kType_CarbonDioxideSensor, "Carbon Dioxide Sensor");
+    
+    co2_detected_ = chr::CarbonDioxideDetectedChar();
+    add_characteristic(co2_detected_);
+}
+
+CarbonDioxideSensorBuilder& CarbonDioxideSensorBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+CarbonDioxideSensorBuilder& CarbonDioxideSensorBuilder::with_status_active() {
+    add_characteristic(chr::StatusActive());
+    return *this;
+}
+
+CarbonDioxideSensorBuilder& CarbonDioxideSensorBuilder::with_level() {
+    add_characteristic(chr::CarbonDioxideLevel());
+    add_characteristic(chr::CarbonDioxidePeakLevel());
+    return *this;
+}
+
+std::shared_ptr<Service> CarbonDioxideSensorBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Doorbell Service Builder (9.31)
+//==============================================================================
+
+DoorbellBuilder::DoorbellBuilder() {
+    service_ = std::make_shared<Service>(kType_Doorbell, "Doorbell");
+    
+    switch_event_ = chr::ProgrammableSwitchEventChar();
+    add_characteristic(switch_event_);
+}
+
+DoorbellBuilder& DoorbellBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+DoorbellBuilder& DoorbellBuilder::with_volume() {
+    add_characteristic(chr::Volume());
+    return *this;
+}
+
+DoorbellBuilder& DoorbellBuilder::with_brightness() {
+    add_characteristic(chr::Brightness());
+    return *this;
+}
+
+std::shared_ptr<Service> DoorbellBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Air Purifier Service Builder (9.35)
+//==============================================================================
+
+AirPurifierBuilder::AirPurifierBuilder() {
+    service_ = std::make_shared<Service>(kType_AirPurifier, "Air Purifier");
+    
+    active_ = chr::ActiveChar();
+    current_state_ = chr::CurrentAirPurifierStateChar();
+    target_state_ = chr::TargetAirPurifierStateChar();
+    
+    add_characteristic(active_);
+    add_characteristic(current_state_);
+    add_characteristic(target_state_);
+}
+
+AirPurifierBuilder& AirPurifierBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+AirPurifierBuilder& AirPurifierBuilder::with_rotation_speed() {
+    add_characteristic(chr::RotationSpeed());
+    return *this;
+}
+
+AirPurifierBuilder& AirPurifierBuilder::with_swing_mode() {
+    add_characteristic(chr::SwingModeChar());
+    return *this;
+}
+
+AirPurifierBuilder& AirPurifierBuilder::with_lock_physical_controls() {
+    add_characteristic(chr::LockPhysicalControls());
+    return *this;
+}
+
+std::shared_ptr<Service> AirPurifierBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Heater Cooler Service Builder (9.36)
+//==============================================================================
+
+HeaterCoolerBuilder::HeaterCoolerBuilder() {
+    service_ = std::make_shared<Service>(kType_HeaterCooler, "Heater Cooler");
+    
+    active_ = chr::ActiveChar();
+    current_temp_ = chr::CurrentTemperature();
+    current_state_ = chr::CurrentHeaterCoolerStateChar();
+    target_state_ = chr::TargetHeaterCoolerStateChar();
+    
+    add_characteristic(active_);
+    add_characteristic(current_temp_);
+    add_characteristic(current_state_);
+    add_characteristic(target_state_);
+}
+
+HeaterCoolerBuilder& HeaterCoolerBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+HeaterCoolerBuilder& HeaterCoolerBuilder::with_rotation_speed() {
+    add_characteristic(chr::RotationSpeed());
+    return *this;
+}
+
+HeaterCoolerBuilder& HeaterCoolerBuilder::with_cooling_threshold() {
+    add_characteristic(chr::CoolingThresholdTemperature());
+    return *this;
+}
+
+HeaterCoolerBuilder& HeaterCoolerBuilder::with_heating_threshold() {
+    add_characteristic(chr::HeatingThresholdTemperature());
+    return *this;
+}
+
+HeaterCoolerBuilder& HeaterCoolerBuilder::with_swing_mode() {
+    add_characteristic(chr::SwingModeChar());
+    return *this;
+}
+
+std::shared_ptr<Service> HeaterCoolerBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Humidifier Dehumidifier Service Builder (9.37)
+//==============================================================================
+
+HumidifierDehumidifierBuilder::HumidifierDehumidifierBuilder() {
+    service_ = std::make_shared<Service>(kType_HumidifierDehumidifier, "Humidifier Dehumidifier");
+    
+    active_ = chr::ActiveChar();
+    current_humidity_ = chr::CurrentRelativeHumidity();
+    current_state_ = chr::CurrentHumidifierDehumidifierStateChar();
+    target_state_ = chr::TargetHumidifierDehumidifierStateChar();
+    
+    add_characteristic(active_);
+    add_characteristic(current_humidity_);
+    add_characteristic(current_state_);
+    add_characteristic(target_state_);
+}
+
+HumidifierDehumidifierBuilder& HumidifierDehumidifierBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+HumidifierDehumidifierBuilder& HumidifierDehumidifierBuilder::with_dehumidifier_threshold() {
+    add_characteristic(chr::RelativeHumidityDehumidifierThreshold());
+    return *this;
+}
+
+HumidifierDehumidifierBuilder& HumidifierDehumidifierBuilder::with_humidifier_threshold() {
+    add_characteristic(chr::RelativeHumidityHumidifierThreshold());
+    return *this;
+}
+
+HumidifierDehumidifierBuilder& HumidifierDehumidifierBuilder::with_water_level() {
+    add_characteristic(chr::WaterLevel());
+    return *this;
+}
+
+std::shared_ptr<Service> HumidifierDehumidifierBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Filter Maintenance Service Builder (9.34)
+//==============================================================================
+
+FilterMaintenanceBuilder::FilterMaintenanceBuilder() {
+    service_ = std::make_shared<Service>(kType_FilterMaintenance, "Filter Maintenance");
+    
+    filter_change_ = chr::FilterChangeIndication();
+    add_characteristic(filter_change_);
+}
+
+FilterMaintenanceBuilder& FilterMaintenanceBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+FilterMaintenanceBuilder& FilterMaintenanceBuilder::with_filter_life_level() {
+    add_characteristic(chr::FilterLifeLevel());
+    return *this;
+}
+
+FilterMaintenanceBuilder& FilterMaintenanceBuilder::with_reset_filter_indication() {
+    add_characteristic(chr::ResetFilterIndication());
+    return *this;
+}
+
+std::shared_ptr<Service> FilterMaintenanceBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Slat Service Builder (9.33)
+//==============================================================================
+
+SlatBuilder::SlatBuilder() {
+    service_ = std::make_shared<Service>(kType_Slat, "Slat");
+    
+    current_state_ = chr::CurrentSlatStateChar();
+    slat_type_ = chr::SlatTypeChar();
+    
+    add_characteristic(current_state_);
+    add_characteristic(slat_type_);
+}
+
+SlatBuilder& SlatBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+SlatBuilder& SlatBuilder::with_swing_mode() {
+    add_characteristic(chr::SwingModeChar());
+    return *this;
+}
+
+SlatBuilder& SlatBuilder::with_tilt_angle() {
+    add_characteristic(chr::CurrentTiltAngle());
+    add_characteristic(chr::TargetTiltAngle());
+    return *this;
+}
+
+std::shared_ptr<Service> SlatBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Valve Service Builder (9.40)
+//==============================================================================
+
+ValveBuilder::ValveBuilder() {
+    service_ = std::make_shared<Service>(kType_Valve, "Valve");
+    
+    active_ = chr::ActiveChar();
+    in_use_ = chr::InUseChar();
+    valve_type_ = chr::ValveTypeChar();
+    
+    add_characteristic(active_);
+    add_characteristic(in_use_);
+    add_characteristic(valve_type_);
+}
+
+ValveBuilder& ValveBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+ValveBuilder& ValveBuilder::with_duration() {
+    add_characteristic(chr::SetDuration());
+    add_characteristic(chr::RemainingDuration());
+    return *this;
+}
+
+ValveBuilder& ValveBuilder::with_is_configured() {
+    add_characteristic(chr::IsConfigured());
+    return *this;
+}
+
+std::shared_ptr<Service> ValveBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Irrigation System Service Builder (9.39)
+//==============================================================================
+
+IrrigationSystemBuilder::IrrigationSystemBuilder() {
+    service_ = std::make_shared<Service>(kType_IrrigationSystem, "Irrigation System");
+    
+    active_ = chr::ActiveChar();
+    program_mode_ = chr::ProgramMode();
+    in_use_ = chr::InUseChar();
+    
+    add_characteristic(active_);
+    add_characteristic(program_mode_);
+    add_characteristic(in_use_);
+}
+
+IrrigationSystemBuilder& IrrigationSystemBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+IrrigationSystemBuilder& IrrigationSystemBuilder::with_remaining_duration() {
+    add_characteristic(chr::RemainingDuration());
+    return *this;
+}
+
+std::shared_ptr<Service> IrrigationSystemBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Faucet Service Builder (9.41)
+//==============================================================================
+
+FaucetBuilder::FaucetBuilder() {
+    service_ = std::make_shared<Service>(kType_Faucet, "Faucet");
+    
+    active_ = chr::ActiveChar();
+    add_characteristic(active_);
+}
+
+FaucetBuilder& FaucetBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+FaucetBuilder& FaucetBuilder::with_status_fault() {
+    add_characteristic(chr::StatusFault());
+    return *this;
+}
+
+std::shared_ptr<Service> FaucetBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Service Label Service Builder (9.38)
+//==============================================================================
+
+ServiceLabelBuilder::ServiceLabelBuilder() {
+    service_ = std::make_shared<Service>(kType_ServiceLabel, "Service Label");
+    
+    namespace_char_ = chr::ServiceLabelNamespaceChar();
+    add_characteristic(namespace_char_);
+}
+
+std::shared_ptr<Service> ServiceLabelBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Carbon Monoxide Sensor Service Builder (9.13)
+//==============================================================================
+
+CarbonMonoxideSensorBuilder::CarbonMonoxideSensorBuilder() {
+    service_ = std::make_shared<Service>(kType_CarbonMonoxideSensor, "Carbon Monoxide Sensor");
+    
+    co_detected_ = chr::CarbonMonoxideDetectedChar();
+    add_characteristic(co_detected_);
+}
+
+CarbonMonoxideSensorBuilder& CarbonMonoxideSensorBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+CarbonMonoxideSensorBuilder& CarbonMonoxideSensorBuilder::with_status_active() {
+    add_characteristic(chr::StatusActive());
+    return *this;
+}
+
+CarbonMonoxideSensorBuilder& CarbonMonoxideSensorBuilder::with_level() {
+    add_characteristic(chr::CarbonMonoxideLevel());
+    add_characteristic(chr::CarbonMonoxidePeakLevel());
+    return *this;
+}
+
+std::shared_ptr<Service> CarbonMonoxideSensorBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Air Quality Sensor Service Builder (9.11)
+//==============================================================================
+
+AirQualitySensorBuilder::AirQualitySensorBuilder() {
+    service_ = std::make_shared<Service>(kType_AirQualitySensor, "Air Quality Sensor");
+    
+    air_quality_ = chr::AirQualityChar();
+    add_characteristic(air_quality_);
+}
+
+AirQualitySensorBuilder& AirQualitySensorBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+AirQualitySensorBuilder& AirQualitySensorBuilder::with_pm25() {
+    add_characteristic(chr::PM2_5Density());
+    return *this;
+}
+
+AirQualitySensorBuilder& AirQualitySensorBuilder::with_pm10() {
+    add_characteristic(chr::PM10Density());
+    return *this;
+}
+
+AirQualitySensorBuilder& AirQualitySensorBuilder::with_voc() {
+    add_characteristic(chr::VOCDensity());
+    return *this;
+}
+
+AirQualitySensorBuilder& AirQualitySensorBuilder::with_status_active() {
+    add_characteristic(chr::StatusActive());
+    return *this;
+}
+
+std::shared_ptr<Service> AirQualitySensorBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Stateless Programmable Switch Service Builder (9.22)
+//==============================================================================
+
+StatelessProgrammableSwitchBuilder::StatelessProgrammableSwitchBuilder() {
+    service_ = std::make_shared<Service>(kType_StatelessProgrammableSwitch, "Stateless Programmable Switch");
+    
+    switch_event_ = chr::ProgrammableSwitchEventChar();
+    add_characteristic(switch_event_);
+}
+
+StatelessProgrammableSwitchBuilder& StatelessProgrammableSwitchBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+StatelessProgrammableSwitchBuilder& StatelessProgrammableSwitchBuilder::with_service_label_index(uint8_t index) {
+    auto label_index = chr::ServiceLabelIndex();
+    label_index->set_value(index);
+    add_characteristic(label_index);
+    return *this;
+}
+
+std::shared_ptr<Service> StatelessProgrammableSwitchBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Microphone Service Builder (9.29)
+//==============================================================================
+
+MicrophoneBuilder::MicrophoneBuilder() {
+    service_ = std::make_shared<Service>(kType_Microphone, "Microphone");
+    
+    mute_ = chr::Mute();
+    add_characteristic(mute_);
+}
+
+MicrophoneBuilder& MicrophoneBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+MicrophoneBuilder& MicrophoneBuilder::with_volume() {
+    add_characteristic(chr::Volume());
+    return *this;
+}
+
+std::shared_ptr<Service> MicrophoneBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Speaker Service Builder (9.30)
+//==============================================================================
+
+SpeakerBuilder::SpeakerBuilder() {
+    service_ = std::make_shared<Service>(kType_Speaker, "Speaker");
+    
+    mute_ = chr::Mute();
+    add_characteristic(mute_);
+}
+
+SpeakerBuilder& SpeakerBuilder::with_name(std::string name) {
+    auto name_char = chr::Name();
+    name_char->set_value(std::move(name));
+    add_characteristic(name_char);
+    return *this;
+}
+
+SpeakerBuilder& SpeakerBuilder::with_volume() {
+    add_characteristic(chr::Volume());
+    return *this;
+}
+
+std::shared_ptr<Service> SpeakerBuilder::build() {
     return service_;
 }
 

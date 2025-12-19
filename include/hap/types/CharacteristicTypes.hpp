@@ -441,5 +441,61 @@ std::shared_ptr<core::Characteristic> IsConfigured();
 std::shared_ptr<core::Characteristic> RemainingDuration();
 std::shared_ptr<core::Characteristic> SetDuration();
 std::shared_ptr<core::Characteristic> ValveTypeChar();
+std::shared_ptr<core::Characteristic> ProgramMode();
+
+// Air Purifier Characteristics (9.35)
+std::shared_ptr<core::Characteristic> CurrentAirPurifierStateChar();
+std::shared_ptr<core::Characteristic> TargetAirPurifierStateChar();
+
+// Heater Cooler Characteristics (9.36)
+std::shared_ptr<core::Characteristic> CurrentHeaterCoolerStateChar();
+std::shared_ptr<core::Characteristic> TargetHeaterCoolerStateChar();
+
+// Humidifier Dehumidifier Characteristics (9.37)
+std::shared_ptr<core::Characteristic> CurrentHumidifierDehumidifierStateChar();
+std::shared_ptr<core::Characteristic> TargetHumidifierDehumidifierStateChar();
+std::shared_ptr<core::Characteristic> WaterLevel();
+std::shared_ptr<core::Characteristic> RelativeHumidityDehumidifierThreshold();
+std::shared_ptr<core::Characteristic> RelativeHumidityHumidifierThreshold();
+
+// Filter Maintenance Characteristics (9.34)
+std::shared_ptr<core::Characteristic> FilterLifeLevel();
+std::shared_ptr<core::Characteristic> FilterChangeIndication();
+std::shared_ptr<core::Characteristic> ResetFilterIndication();
+
+// Slat Characteristics (9.33)
+std::shared_ptr<core::Characteristic> CurrentSlatStateChar();
+std::shared_ptr<core::Characteristic> SlatTypeChar();
+std::shared_ptr<core::Characteristic> CurrentTiltAngle();
+std::shared_ptr<core::Characteristic> TargetTiltAngle();
+
+// Window Tilt Characteristics
+std::shared_ptr<core::Characteristic> CurrentHorizontalTiltAngle();
+std::shared_ptr<core::Characteristic> TargetHorizontalTiltAngle();
+std::shared_ptr<core::Characteristic> CurrentVerticalTiltAngle();
+std::shared_ptr<core::Characteristic> TargetVerticalTiltAngle();
+
+// Air Quality Extended Characteristics
+std::shared_ptr<core::Characteristic> OzoneDensity();
+std::shared_ptr<core::Characteristic> NitrogenDioxideDensity();
+std::shared_ptr<core::Characteristic> SulphurDioxideDensity();
+std::shared_ptr<core::Characteristic> AirParticulateDensity();
+std::shared_ptr<core::Characteristic> AirParticulateSize();
+std::shared_ptr<core::Characteristic> CarbonMonoxidePeakLevel();
+std::shared_ptr<core::Characteristic> CarbonDioxidePeakLevel();
+
+// Lock Management Characteristics
+std::shared_ptr<core::Characteristic> LockControlPoint();
+std::shared_ptr<core::Characteristic> LockPhysicalControls();
+std::shared_ptr<core::Characteristic> LockManagementAutoSecurityTimeout();
+std::shared_ptr<core::Characteristic> LockLastKnownAction();
+std::shared_ptr<core::Characteristic> Logs();
+
+// Miscellaneous Characteristics
+std::shared_ptr<core::Characteristic> Version();
+std::shared_ptr<core::Characteristic> AdministratorOnlyAccess();
+std::shared_ptr<core::Characteristic> AudioFeedback();
+std::shared_ptr<core::Characteristic> StatusJammed();
+std::shared_ptr<core::Characteristic> SecuritySystemAlarmType();
 
 } // namespace hap::characteristic

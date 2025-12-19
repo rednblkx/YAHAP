@@ -653,4 +653,346 @@ std::shared_ptr<Characteristic> ValveTypeChar() {
     return c;
 }
 
+std::shared_ptr<Characteristic> ProgramMode() {
+    auto c = std::make_shared<Characteristic>(kType_ProgramMode, Format::UInt8, PERM_PR_NT);
+    c->set_min_value(0);
+    c->set_max_value(2);
+    c->set_value(static_cast<uint8_t>(0)); // No program scheduled
+    return c;
+}
+
+//==============================================================================
+// Air Purifier Characteristics (9.35)
+//==============================================================================
+
+std::shared_ptr<Characteristic> CurrentAirPurifierStateChar() {
+    auto c = std::make_shared<Characteristic>(kType_CurrentAirPurifierState, Format::UInt8, PERM_PR_NT);
+    c->set_min_value(0);
+    c->set_max_value(2);
+    c->set_value(static_cast<uint8_t>(0)); // Inactive
+    return c;
+}
+
+std::shared_ptr<Characteristic> TargetAirPurifierStateChar() {
+    auto c = std::make_shared<Characteristic>(kType_TargetAirPurifierState, Format::UInt8, PERM_PR_PW_NT);
+    c->set_min_value(0);
+    c->set_max_value(1);
+    c->set_value(static_cast<uint8_t>(0)); // Manual
+    return c;
+}
+
+//==============================================================================
+// Heater Cooler Characteristics (9.36)
+//==============================================================================
+
+std::shared_ptr<Characteristic> CurrentHeaterCoolerStateChar() {
+    auto c = std::make_shared<Characteristic>(kType_CurrentHeaterCoolerState, Format::UInt8, PERM_PR_NT);
+    c->set_min_value(0);
+    c->set_max_value(3);
+    c->set_value(static_cast<uint8_t>(0)); // Inactive
+    return c;
+}
+
+std::shared_ptr<Characteristic> TargetHeaterCoolerStateChar() {
+    auto c = std::make_shared<Characteristic>(kType_TargetHeaterCoolerState, Format::UInt8, PERM_PR_PW_NT);
+    c->set_min_value(0);
+    c->set_max_value(2);
+    c->set_value(static_cast<uint8_t>(0)); // Auto
+    return c;
+}
+
+//==============================================================================
+// Humidifier Dehumidifier Characteristics (9.37)
+//==============================================================================
+
+std::shared_ptr<Characteristic> CurrentHumidifierDehumidifierStateChar() {
+    auto c = std::make_shared<Characteristic>(kType_CurrentHumidifierDehumidifierState, Format::UInt8, PERM_PR_NT);
+    c->set_min_value(0);
+    c->set_max_value(3);
+    c->set_value(static_cast<uint8_t>(0)); // Inactive
+    return c;
+}
+
+std::shared_ptr<Characteristic> TargetHumidifierDehumidifierStateChar() {
+    auto c = std::make_shared<Characteristic>(kType_TargetHumidifierDehumidifierState, Format::UInt8, PERM_PR_PW_NT);
+    c->set_min_value(0);
+    c->set_max_value(2);
+    c->set_value(static_cast<uint8_t>(0)); // Humidifier or Dehumidifier
+    return c;
+}
+
+std::shared_ptr<Characteristic> WaterLevel() {
+    auto c = std::make_shared<Characteristic>(kType_WaterLevel, Format::Float, PERM_PR_NT);
+    c->set_min_value(0);
+    c->set_max_value(100);
+    c->set_value(0.0f);
+    return c;
+}
+
+std::shared_ptr<Characteristic> RelativeHumidityDehumidifierThreshold() {
+    auto c = std::make_shared<Characteristic>(kType_RelativeHumidityDehumidifierThreshold, Format::Float, PERM_PR_PW_NT);
+    c->set_unit("percentage");
+    c->set_min_value(0);
+    c->set_max_value(100);
+    c->set_min_step(1);
+    c->set_value(50.0f);
+    return c;
+}
+
+std::shared_ptr<Characteristic> RelativeHumidityHumidifierThreshold() {
+    auto c = std::make_shared<Characteristic>(kType_RelativeHumidityHumidifierThreshold, Format::Float, PERM_PR_PW_NT);
+    c->set_unit("percentage");
+    c->set_min_value(0);
+    c->set_max_value(100);
+    c->set_min_step(1);
+    c->set_value(50.0f);
+    return c;
+}
+
+//==============================================================================
+// Filter Maintenance Characteristics (9.34)
+//==============================================================================
+
+std::shared_ptr<Characteristic> FilterLifeLevel() {
+    auto c = std::make_shared<Characteristic>(kType_FilterLifeLevel, Format::Float, PERM_PR_NT);
+    c->set_min_value(0);
+    c->set_max_value(100);
+    c->set_value(100.0f);
+    return c;
+}
+
+std::shared_ptr<Characteristic> FilterChangeIndication() {
+    auto c = std::make_shared<Characteristic>(kType_FilterChangeIndication, Format::UInt8, PERM_PR_NT);
+    c->set_min_value(0);
+    c->set_max_value(1);
+    c->set_value(static_cast<uint8_t>(0)); // Filter OK
+    return c;
+}
+
+std::shared_ptr<Characteristic> ResetFilterIndication() {
+    auto c = std::make_shared<Characteristic>(kType_ResetFilterIndication, Format::UInt8, PERM_PW);
+    c->set_min_value(1);
+    c->set_max_value(1);
+    return c;
+}
+
+//==============================================================================
+// Slat Characteristics (9.33)
+//==============================================================================
+
+std::shared_ptr<Characteristic> CurrentSlatStateChar() {
+    auto c = std::make_shared<Characteristic>(kType_CurrentSlatState, Format::UInt8, PERM_PR_NT);
+    c->set_min_value(0);
+    c->set_max_value(2);
+    c->set_value(static_cast<uint8_t>(0)); // Fixed
+    return c;
+}
+
+std::shared_ptr<Characteristic> SlatTypeChar() {
+    auto c = std::make_shared<Characteristic>(kType_SlatType, Format::UInt8, PERM_PR);
+    c->set_min_value(0);
+    c->set_max_value(1);
+    c->set_value(static_cast<uint8_t>(0)); // Horizontal
+    return c;
+}
+
+std::shared_ptr<Characteristic> CurrentTiltAngle() {
+    auto c = std::make_shared<Characteristic>(kType_CurrentTiltAngle, Format::Int, PERM_PR_NT);
+    c->set_unit("arcdegrees");
+    c->set_min_value(-90);
+    c->set_max_value(90);
+    c->set_min_step(1);
+    c->set_value(static_cast<int32_t>(0));
+    return c;
+}
+
+std::shared_ptr<Characteristic> TargetTiltAngle() {
+    auto c = std::make_shared<Characteristic>(kType_TargetTiltAngle, Format::Int, PERM_PR_PW_NT);
+    c->set_unit("arcdegrees");
+    c->set_min_value(-90);
+    c->set_max_value(90);
+    c->set_min_step(1);
+    c->set_value(static_cast<int32_t>(0));
+    return c;
+}
+
+//==============================================================================
+// Window Tilt Characteristics
+//==============================================================================
+
+std::shared_ptr<Characteristic> CurrentHorizontalTiltAngle() {
+    auto c = std::make_shared<Characteristic>(kType_CurrentHorizontalTiltAngle, Format::Int, PERM_PR_NT);
+    c->set_unit("arcdegrees");
+    c->set_min_value(-90);
+    c->set_max_value(90);
+    c->set_min_step(1);
+    c->set_value(static_cast<int32_t>(0));
+    return c;
+}
+
+std::shared_ptr<Characteristic> TargetHorizontalTiltAngle() {
+    auto c = std::make_shared<Characteristic>(kType_TargetHorizontalTiltAngle, Format::Int, PERM_PR_PW_NT);
+    c->set_unit("arcdegrees");
+    c->set_min_value(-90);
+    c->set_max_value(90);
+    c->set_min_step(1);
+    c->set_value(static_cast<int32_t>(0));
+    return c;
+}
+
+std::shared_ptr<Characteristic> CurrentVerticalTiltAngle() {
+    auto c = std::make_shared<Characteristic>(kType_CurrentVerticalTiltAngle, Format::Int, PERM_PR_NT);
+    c->set_unit("arcdegrees");
+    c->set_min_value(-90);
+    c->set_max_value(90);
+    c->set_min_step(1);
+    c->set_value(static_cast<int32_t>(0));
+    return c;
+}
+
+std::shared_ptr<Characteristic> TargetVerticalTiltAngle() {
+    auto c = std::make_shared<Characteristic>(kType_TargetVerticalTiltAngle, Format::Int, PERM_PR_PW_NT);
+    c->set_unit("arcdegrees");
+    c->set_min_value(-90);
+    c->set_max_value(90);
+    c->set_min_step(1);
+    c->set_value(static_cast<int32_t>(0));
+    return c;
+}
+
+//==============================================================================
+// Air Quality Extended Characteristics
+//==============================================================================
+
+std::shared_ptr<Characteristic> OzoneDensity() {
+    auto c = std::make_shared<Characteristic>(kType_OzoneDensity, Format::Float, PERM_PR_NT);
+    c->set_min_value(0);
+    c->set_max_value(1000);
+    c->set_value(0.0f);
+    return c;
+}
+
+std::shared_ptr<Characteristic> NitrogenDioxideDensity() {
+    auto c = std::make_shared<Characteristic>(kType_NitrogenDioxideDensity, Format::Float, PERM_PR_NT);
+    c->set_min_value(0);
+    c->set_max_value(1000);
+    c->set_value(0.0f);
+    return c;
+}
+
+std::shared_ptr<Characteristic> SulphurDioxideDensity() {
+    auto c = std::make_shared<Characteristic>(kType_SulphurDioxideDensity, Format::Float, PERM_PR_NT);
+    c->set_min_value(0);
+    c->set_max_value(1000);
+    c->set_value(0.0f);
+    return c;
+}
+
+std::shared_ptr<Characteristic> AirParticulateDensity() {
+    auto c = std::make_shared<Characteristic>(kType_AirParticulateDensity, Format::Float, PERM_PR_NT);
+    c->set_min_value(0);
+    c->set_max_value(1000);
+    c->set_value(0.0f);
+    return c;
+}
+
+std::shared_ptr<Characteristic> AirParticulateSize() {
+    auto c = std::make_shared<Characteristic>(kType_AirParticulateSize, Format::UInt8, PERM_PR);
+    c->set_min_value(0);
+    c->set_max_value(1);
+    c->set_value(static_cast<uint8_t>(0)); // 2.5 um
+    return c;
+}
+
+std::shared_ptr<Characteristic> CarbonMonoxidePeakLevel() {
+    auto c = std::make_shared<Characteristic>(kType_CarbonMonoxidePeakLevel, Format::Float, PERM_PR_NT);
+    c->set_min_value(0);
+    c->set_max_value(100);
+    c->set_value(0.0f);
+    return c;
+}
+
+std::shared_ptr<Characteristic> CarbonDioxidePeakLevel() {
+    auto c = std::make_shared<Characteristic>(kType_CarbonDioxidePeakLevel, Format::Float, PERM_PR_NT);
+    c->set_min_value(0);
+    c->set_max_value(100000);
+    c->set_value(0.0f);
+    return c;
+}
+
+//==============================================================================
+// Lock Management Characteristics
+//==============================================================================
+
+std::shared_ptr<Characteristic> LockControlPoint() {
+    auto c = std::make_shared<Characteristic>(kType_LockControlPoint, Format::TLV8, PERM_PW);
+    return c;
+}
+
+std::shared_ptr<Characteristic> LockPhysicalControls() {
+    auto c = std::make_shared<Characteristic>(kType_LockPhysicalControls, Format::UInt8, PERM_PR_PW_NT);
+    c->set_min_value(0);
+    c->set_max_value(1);
+    c->set_value(static_cast<uint8_t>(0)); // Control Lock Disabled
+    return c;
+}
+
+std::shared_ptr<Characteristic> LockManagementAutoSecurityTimeout() {
+    auto c = std::make_shared<Characteristic>(kType_LockManagementAutoSecurityTimeout, Format::UInt32, PERM_PR_PW_NT);
+    c->set_unit("seconds");
+    c->set_value(static_cast<uint32_t>(0));
+    return c;
+}
+
+std::shared_ptr<Characteristic> LockLastKnownAction() {
+    auto c = std::make_shared<Characteristic>(kType_LockLastKnownAction, Format::UInt8, PERM_PR_NT);
+    c->set_min_value(0);
+    c->set_max_value(10);
+    c->set_value(static_cast<uint8_t>(0));
+    return c;
+}
+
+std::shared_ptr<Characteristic> Logs() {
+    auto c = std::make_shared<Characteristic>(kType_Logs, Format::TLV8, PERM_PR_NT);
+    return c;
+}
+
+//==============================================================================
+// Miscellaneous Characteristics
+//==============================================================================
+
+std::shared_ptr<Characteristic> Version() {
+    auto c = std::make_shared<Characteristic>(kType_Version, Format::String, PERM_PR);
+    c->set_value(std::string("1.1.0"));
+    return c;
+}
+
+std::shared_ptr<Characteristic> AdministratorOnlyAccess() {
+    auto c = std::make_shared<Characteristic>(kType_AdministratorOnlyAccess, Format::Bool, PERM_PR_PW_NT);
+    c->set_value(false);
+    return c;
+}
+
+std::shared_ptr<Characteristic> AudioFeedback() {
+    auto c = std::make_shared<Characteristic>(kType_AudioFeedback, Format::Bool, PERM_PR_PW_NT);
+    c->set_value(false);
+    return c;
+}
+
+std::shared_ptr<Characteristic> StatusJammed() {
+    auto c = std::make_shared<Characteristic>(kType_StatusJammed, Format::UInt8, PERM_PR_NT);
+    c->set_min_value(0);
+    c->set_max_value(1);
+    c->set_value(static_cast<uint8_t>(0)); // Not Jammed
+    return c;
+}
+
+std::shared_ptr<Characteristic> SecuritySystemAlarmType() {
+    auto c = std::make_shared<Characteristic>(kType_SecuritySystemAlarmType, Format::UInt8, PERM_PR_NT);
+    c->set_min_value(0);
+    c->set_max_value(1);
+    c->set_value(static_cast<uint8_t>(0));
+    return c;
+}
+
 } // namespace hap::characteristic
