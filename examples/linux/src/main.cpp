@@ -6,7 +6,9 @@
 #include "hap/core/Accessory.hpp"
 #include "hap/core/Service.hpp"
 #include "hap/core/Characteristic.hpp"
+#include "hap/types/ServiceTypes.hpp"
 
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <thread>
@@ -26,7 +28,7 @@ void signal_handler(int) {
 int main() {
     std::cout << "HAP Lightbulb Example (Linux)" << std::endl;
     std::cout << "==============================" << std::endl;
-    std::cout << "Setup Code: 123-45-678" << std::endl;
+    std::cout << "Setup Code: 111-22-333" << std::endl;
     std::cout << "Port: 8080" << std::endl;
 
     // Instantiate platform interfaces
@@ -35,156 +37,56 @@ int main() {
     auto crypto = std::make_unique<linux_pal::LinuxCrypto>();
     auto network = std::make_unique<linux_pal::LinuxNetwork>();
 
-    // Create accessory
-    auto accessory = std::make_shared<hap::core::Accessory>(1);
-    
-    // Accessory Information Service (REQUIRED by HAP spec)
-    auto info_service = std::make_shared<hap::core::Service>(0x3E, "Accessory Information");
-    info_service->set_iid(1);
-    
-    // Name (0x23) - REQUIRED
-    auto name_char = std::make_shared<hap::core::Characteristic>(
-        0x23, hap::core::Format::String,
-        std::vector{hap::core::Permission::PairedRead}
-    );
-    name_char->set_iid(2);
-    name_char->set_value(std::string("HAP Lightbulb"));
-    info_service->add_characteristic(name_char);
-    
-    // Manufacturer (0x20) - REQUIRED
-    auto manufacturer_char = std::make_shared<hap::core::Characteristic>(
-        0x20, hap::core::Format::String,
-        std::vector{hap::core::Permission::PairedRead}
-    );
-    manufacturer_char->set_iid(3);
-    manufacturer_char->set_value(std::string("Example Corp"));
-    info_service->add_characteristic(manufacturer_char);
-    
-    // Model (0x21) - REQUIRED
-    auto model_char = std::make_shared<hap::core::Characteristic>(
-        0x21, hap::core::Format::String,
-        std::vector{hap::core::Permission::PairedRead}
-    );
-    model_char->set_iid(4);
-    model_char->set_value(std::string("HAP-Light-v1"));
-    info_service->add_characteristic(model_char);
-    
-    // Serial Number (0x30) - REQUIRED
-    auto serial_char = std::make_shared<hap::core::Characteristic>(
-        0x30, hap::core::Format::String,
-        std::vector{hap::core::Permission::PairedRead}
-    );
-    serial_char->set_iid(5);
-    serial_char->set_value(std::string("00000001"));
-    info_service->add_characteristic(serial_char);
-    
-    // Firmware Revision (0x52) - REQUIRED
-    auto firmware_char = std::make_shared<hap::core::Characteristic>(
-        0x52, hap::core::Format::String,
-        std::vector{hap::core::Permission::PairedRead}
-    );
-    firmware_char->set_iid(6);
-    firmware_char->set_value(std::string("1.0.0"));
-    info_service->add_characteristic(firmware_char);
-    
-    // Identify routine
-    auto identify_routine = []() {
-        std::cout << "🔆 IDENTIFY routine triggered!" << std::endl;
-    };
-
-    // Identify (0x14) - REQUIRED, write-only
-    auto identify_char = std::make_shared<hap::core::Characteristic>(
-        0x14, hap::core::Format::Bool,
-        std::vector{hap::core::Permission::PairedWrite}
-    );
-    identify_char->set_iid(7);
-    identify_char->set_value(false);
-    identify_char->set_write_callback([identify_routine](const hap::core::Value& value) {
-        bool identify = std::get<bool>(value);
-        if (identify) {
-            identify_routine();
-        }
-    });
-    info_service->add_characteristic(identify_char);
-    
-    accessory->add_service(info_service);
-    
-    // Lightbulb Service
-    auto lightbulb_service = std::make_shared<hap::core::Service>(0x43, "Lightbulb");
-    lightbulb_service->set_iid(10);
-    
-    // Load persisted state
-    bool light_on = false;
-    int32_t brightness = 100;
-    
-    auto on_data = storage->get("char_on");
-    if (on_data && !on_data->empty()) {
-        light_on = on_data->at(0) != 0;
-    }
-    
-    auto brightness_data = storage->get("char_brightness");
-    if (brightness_data && brightness_data->size() == sizeof(int32_t)) {
-        std::memcpy(&brightness, brightness_data->data(), sizeof(int32_t));
-    }
-
-    auto on_char = std::make_shared<hap::core::Characteristic>(
-        0x25, hap::core::Format::Bool,
-        std::vector{hap::core::Permission::PairedRead, 
-                   hap::core::Permission::PairedWrite,
-                   hap::core::Permission::Notify}
-    );
-    on_char->set_iid(11);
-    on_char->set_value(light_on);
-    on_char->set_description("Controls the lightbulb power state");
-    
-    // Set write callback
-    auto storage_ptr = storage.get();
-    on_char->set_write_callback([storage_ptr](const hap::core::Value& value) {
-        bool is_on = std::get<bool>(value);
-        std::cout << "💡 Lightbulb turned " << (is_on ? "ON" : "OFF") << std::endl;
-        
-        uint8_t byte = is_on ? 1 : 0;
-        storage_ptr->set("char_on", std::span(&byte, 1));
-    });
-    
-    lightbulb_service->add_characteristic(on_char);
-    
-    // Brightness characteristic with metadata
-    auto brightness_char = std::make_shared<hap::core::Characteristic>(
-        0x8, hap::core::Format::Int,  // Brightness characteristic
-        std::vector{hap::core::Permission::PairedRead, 
-                   hap::core::Permission::PairedWrite,
-                   hap::core::Permission::Notify}
-    );
-    brightness_char->set_iid(12);
-    brightness_char->set_value(brightness);
-    brightness_char->set_description("Lightbulb brightness level");
-    brightness_char->set_unit("percentage");
-    brightness_char->set_min_value(0.0);
-    brightness_char->set_max_value(100.0);
-    brightness_char->set_min_step(1.0);
-    brightness_char->set_write_callback([storage_ptr](const hap::core::Value& value) {
-        int32_t level = std::get<int32_t>(value);
-        std::cout << "💡 Brightness set to " << level << "%" << std::endl;
-        
-        storage_ptr->set("char_brightness", std::span(reinterpret_cast<const uint8_t*>(&level), sizeof(level)));
-    });
-    
-    lightbulb_service->add_characteristic(brightness_char);
-    accessory->add_service(lightbulb_service);
-    
-    // Initialize Server
+    // Create Accessory Server
     hap::AccessoryServer::Config config;
-    config.crypto = crypto.get();
-    config.network = network.get();
-    config.storage = storage.get();
     config.system = system.get();
-    config.accessory_id = "AA:BB:CC:DD:EE:F2"; // Example ID
-    config.setup_code = "123-45-678";
-    config.device_name = "HAP Lightbulb";
-    config.port = 8080;
-    config.on_identify = identify_routine;
+    config.storage = storage.get();
+    config.crypto = crypto.get();
+    config.ble = nullptr; // BLE only
+    config.network = network.get();
     
+    config.device_name = "HAP-Lock";
+    config.port = 8080;
+    // config.accessory_id = "11:64:46:32:20:24"; // Auto-generated if empty
+    config.setup_code = "111-22-333";
+    config.category_id = hap::service::AccessoryCategory::DoorLock;
+    
+    // Create Accessory using new simplified builders
+    auto accessory = std::make_shared<hap::core::Accessory>(1);
+
+    // Accessory Information Service
+    auto info_service = hap::service::AccessoryInformationBuilder()
+        .name("HAP Lock")
+        .manufacturer("Example Corp")
+        .model("HAP-Lock-v1")
+        .serial_number("00000001")
+        .firmware_revision("1.0.0")
+        .hardware_revision("1.0.0")
+        .on_identify([]() {
+          std::cout << "🔆 IDENTIFY routine triggered!" << std::endl;
+        })
+        .build();
+    accessory->add_service(info_service);
+    std::shared_ptr<hap::core::Service> lock_service = hap::service::LockMechanismBuilder()
+        .on_lock_change([&](bool locked) {
+            std::cout << "🔒 Lock changed to " << (locked ? "LOCKED" : "UNLOCKED") << std::endl;
+            lock_service->characteristics()[0]->set_value(locked);
+        })
+        .build();
+    accessory->add_service(lock_service);
+    
+    // Lock Management Service - MANDATORY for Lock Profile per HAP Spec 11.2
+    auto lock_mgmt_service = hap::service::LockManagementBuilder()
+        .on_control_point([](const std::vector<uint8_t>& tlv) {
+            std::cout << "🔒 Control Point TLV: ";
+            for (uint8_t b : tlv) {
+                std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b);
+            }
+            std::cout << std::endl;
+        })
+        .build();
+    accessory->add_service(lock_mgmt_service);    
+
     g_server = std::make_unique<hap::AccessoryServer>(std::move(config));
     
     g_server->add_accessory(accessory);
