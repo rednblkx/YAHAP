@@ -12,7 +12,6 @@
 
 namespace hap {
 
-// Pimpl idiom to hide implementation details
 class AccessoryServer::Impl {
 public:
     std::unique_ptr<transport::Router> router;
@@ -488,7 +487,12 @@ void AccessoryServer::on_tcp_disconnect(uint32_t connection_id) {
 }
 
 void AccessoryServer::broadcast_event(uint64_t aid, uint64_t iid, const core::Value& value, uint32_t exclude_conn_id) {
-    // Build JSON body
+    if (impl_->ble_transport) {
+        impl_->ble_transport->notify_value_changed(aid, iid, value, exclude_conn_id);
+    }
+    if(!config_.network) {
+        return;
+    }
     nlohmann::json body_json;
     nlohmann::json characteristics = nlohmann::json::array();
     nlohmann::json char_json;
@@ -506,7 +510,7 @@ void AccessoryServer::broadcast_event(uint64_t aid, uint64_t iid, const core::Va
         } else if constexpr (std::is_same_v<T, std::string>) {
             char_json["value"] = arg;
         } else {
-            char_json["value"] = nullptr; // Handle other types if needed
+            char_json["value"] = nullptr;
         }
     }, value);
 
@@ -514,7 +518,6 @@ void AccessoryServer::broadcast_event(uint64_t aid, uint64_t iid, const core::Va
     body_json["characteristics"] = characteristics;
     std::string body = body_json.dump();
 
-    // Build HTTP EVENT response
     std::ostringstream ss;
     ss << "EVENT/1.0 200 OK\r\n";
     ss << "Content-Type: application/hap+json\r\n";
@@ -525,7 +528,6 @@ void AccessoryServer::broadcast_event(uint64_t aid, uint64_t iid, const core::Va
     std::string response_str = ss.str();
     std::vector<uint8_t> response_bytes(response_str.begin(), response_str.end());
 
-    // Send to all subscribed connections
     for (auto& [conn_id, ctx] : impl_->connections) {
         if (conn_id == exclude_conn_id) continue;
         

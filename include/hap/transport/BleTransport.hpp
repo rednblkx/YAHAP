@@ -7,6 +7,7 @@
 #include <memory>
 #include <map>
 #include <vector>
+#include <array>
 
 namespace hap::transport {
 
@@ -58,6 +59,23 @@ public:
      * @brief Update the accessory ID at runtime.
      */
     void set_accessory_id(const std::string& new_id);
+
+    /**
+     * @brief Notify controllers of a characteristic value change.
+     * 
+     * Call this when a characteristic value changes from a non-BLE source
+     * (e.g., physical button, timer, sensor). Automatically selects the
+     * appropriate event type per HAP Spec 7.4.6:
+     * - Connected Events: Zero-length indication to subscribed controllers
+     * - Broadcasted Events: Encrypted advertisement (if configured)
+     * - Disconnected Events: GSN increment in regular advertisement
+     * 
+     * @param aid Accessory ID (usually 1 for single accessory)
+     * @param iid Characteristic Instance ID
+     * @param value The new characteristic value
+     * @param exclude_conn_id Connection ID to exclude (0 = notify all)
+     */
+    void notify_value_changed(uint64_t aid, uint64_t iid, const core::Value& value, uint32_t exclude_conn_id = 0);
 
 private:
     Config config_;
@@ -120,14 +138,27 @@ private:
     };
     std::map<uint16_t, CharacteristicMetadata> pairing_char_metadata_;
     
-    
-    // Subscriptions: UUID -> List of Connection IDs
     std::map<std::string, std::vector<uint16_t>> subscriptions_;
+
+    struct BroadcastConfig {
+        uint16_t iid = 0;
+        uint8_t interval = 0x01;  // 0x01=20ms, 0x02=1280ms, 0x03=2560ms
+        bool enabled = false;
+    };
+    std::map<uint16_t, BroadcastConfig> broadcast_configs_;
+    
+    // Broadcast encryption key state (per HAP Spec 7.4.7.3-7.4.7.4)
+    std::array<uint8_t, 32> broadcast_key_ = {};
+    uint16_t broadcast_key_gsn_start_ = 0;  // GSN when key was generated
+    bool broadcast_key_valid_ = false;
+    
+    bool is_connected_ = false;
 
 
     void setup_hap_service();
     void setup_protocol_info_service();
     void increment_gsn();
+    uint16_t get_current_gsn();
     void check_session_timeouts();
     
     void handle_hap_write(uint16_t connection_id, const std::string& uuid, std::span<const uint8_t> data);
@@ -140,7 +171,43 @@ private:
     bool process_characteristic_write(uint16_t connection_id, uint16_t tid, const std::string& uuid, std::span<const uint8_t> body);
     
     void send_response(uint16_t conn_id, uint16_t tid, const std::string& uuid, uint8_t status, std::span<const uint8_t> body);
-    void send_notification_pdu(uint64_t aid, uint64_t iid, const core::Value& value);
+    
+    /**
+     * @brief Handle characteristic change and dispatch appropriate event type.
+     * 
+     * Per HAP Spec 7.4.6, selects between Connected, Broadcasted, or Disconnected
+     * events based on connection state and characteristic configuration.
+     */
+    void handle_characteristic_change(uint64_t aid, uint64_t iid, const core::Value& value, uint32_t exclude_conn_id = 0);
+    
+    /**
+     * @brief Send Connected Event (zero-length GATT indication).
+     * Per HAP Spec 7.4.6.1: Sent to controllers that registered for indications.
+     */
+    void send_connected_event(uint16_t iid);
+    
+    /**
+     * @brief Send Broadcasted Event (encrypted advertisement with value).
+     * Per HAP Spec 7.4.6.2: Sent when disconnected and broadcast is configured.
+     */
+    void send_broadcasted_event(uint16_t iid, const core::Value& value);
+    
+    /**
+     * @brief Handle Disconnected Event (GSN increment + fast advertising).
+     * Per HAP Spec 7.4.6.3: Updates GSN and uses 20ms advertising for 3 seconds.
+     */
+    void send_disconnected_event(uint16_t iid);
+    
+    /**
+     * @brief Build encrypted advertisement payload per HAP Spec 7.4.7.3.
+     */
+    std::vector<uint8_t> build_encrypted_advertisement_payload(uint16_t iid, const core::Value& value);
+    
+    /**
+     * @brief Check if broadcast encryption key is valid and not expired.
+     * Per HAP Spec 7.4.7.4: Key expires after 32767 GSN increments.
+     */
+    bool is_broadcast_key_valid();
     
     static std::vector<uint8_t> serialize_value(const core::Value& value, core::Format format);
     void register_accessory_info_service();

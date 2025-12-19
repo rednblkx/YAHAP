@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <optional>
+#include <array>
 
 namespace hap::platform {
 
@@ -119,6 +120,60 @@ struct Ble {
      * @param callback The callback function.
      */
     virtual void set_disconnect_callback(DisconnectCallback callback) = 0;
+
+    /**
+     * @brief Send a GATT indication to a connected client.
+     * 
+     * Per HAP Spec 7.4.6.1 Connected Events: When a characteristic value changes,
+     * a zero-length indication is sent. The controller then reads the value.
+     * 
+     * @param connection_id The ID of the connection to send to.
+     * @param characteristic_uuid The UUID of the characteristic.
+     * @param data The data to send (typically empty for HAP Connected Events).
+     * @return true if indication was queued successfully.
+     */
+    virtual bool send_indication(uint16_t connection_id, const std::string& characteristic_uuid, 
+                                  std::span<const uint8_t> data) { 
+        // Default implementation uses send_notification (may not wait for ACK)
+        send_notification(connection_id, characteristic_uuid, data);
+        return true;
+    }
+
+    /**
+     * @brief Encrypted advertisement data for HAP BLE Broadcasted Events.
+     * 
+     * Per HAP Spec 7.4.6.2 and 7.4.7.3: Broadcasted Events use encrypted
+     * advertisement payloads secured with ChaCha20-Poly1305.
+     */
+    struct EncryptedAdvertisement {
+        std::array<uint8_t, 6> advertising_id;     ///< Device advertising identifier
+        std::vector<uint8_t> encrypted_payload;     ///< 12-byte encrypted data + 4-byte truncated auth tag
+        uint16_t gsn;                               ///< Current Global State Number
+    };
+
+    /**
+     * @brief Start encrypted advertisement for HAP Broadcasted Events.
+     * 
+     * Per HAP Spec 7.4.6.2: When a characteristic configured for broadcast
+     * notification changes while disconnected, the accessory broadcasts an
+     * encrypted advertisement containing the value.
+     * 
+     * @param data The encrypted advertisement payload.
+     * @param interval_ms Advertising interval: 20ms (0x01), 1280ms (0x02), or 2560ms (0x03).
+     * @param duration_ms Duration to advertise (typically 3000ms per spec).
+     */
+    virtual void start_encrypted_advertising(const EncryptedAdvertisement& data,
+                                              uint32_t interval_ms = 20,
+                                              uint32_t duration_ms = 3000) {
+        // Default: no-op. Platform implementations may override.
+        (void)data; (void)interval_ms; (void)duration_ms;
+    }
+
+    /**
+     * @brief Check if any client is currently connected.
+     * @return true if at least one client is connected.
+     */
+    virtual bool has_connections() const { return false; }
 };
 
 } // namespace hap::platform

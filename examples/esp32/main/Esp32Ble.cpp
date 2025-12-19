@@ -359,11 +359,15 @@ int Esp32Ble::ble_gap_event(struct ble_gap_event *event, void *arg) {
             }
             break;
         case BLE_GAP_EVENT_SUBSCRIBE:
-            ESP_LOGI(TAG, "Subscribe: conn=%d attr=%d reason=%d", event->subscribe.conn_handle, event->subscribe.attr_handle, event->subscribe.reason);
+            ESP_LOGI(TAG, "Subscribe: conn=%d attr=%d reason=%d notify=%d indicate=%d", 
+                event->subscribe.conn_handle, event->subscribe.attr_handle, event->subscribe.reason,
+                event->subscribe.cur_notify, event->subscribe.cur_indicate);
             for (auto* ctx : all_contexts) {
                  if (ctx->val_handle == event->subscribe.attr_handle) {
                      if (ctx->on_subscribe) {
-                         ctx->on_subscribe(event->subscribe.conn_handle, event->subscribe.cur_notify > 0);
+                         // HAP uses indications (cur_indicate), but also support notifications
+                         bool subscribed = (event->subscribe.cur_notify > 0) || (event->subscribe.cur_indicate > 0);
+                         ctx->on_subscribe(event->subscribe.conn_handle, subscribed);
                      }
                      break;
                  }

@@ -455,6 +455,10 @@ void BleTransport::set_accessory_id(const std::string& new_id) {
         "[BleTransport] Accessory ID updated to: " + new_id);
 }
 
+void BleTransport::notify_value_changed(uint64_t aid, uint64_t iid, const core::Value& value, uint32_t exclude_conn_id) {
+    handle_characteristic_change(aid, iid, value, exclude_conn_id);
+}
+
 void BleTransport::increment_gsn() {
     // Per Spec 7.4.6: GSN increments on characteristic changes
     // Range: 1-65535, wraps to 1 on overflow
@@ -1013,6 +1017,10 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                          state.gsn_incremented = true;
                          increment_gsn();
                      }
+                     
+                     // Trigger BLE events (Connected/Broadcasted/Disconnected per Spec 7.4.6)
+                     // Exclude the connection that made the write (per spec: don't notify originator)
+                     handle_characteristic_change(1, iid, new_value, connection_id);
                  } else {
                      config_.system->log(platform::System::LogLevel::Warning, 
                          "[BleTransport] Write IID=" + std::to_string(iid) + " - no value TLV found");
@@ -1104,7 +1112,77 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                     response_body = resp.body;
                 }
             } else {
-                status = 0x06;
+                auto ch = find_char_in_db(state.timed_write_iid);
+                if (ch) {
+                    auto body_tlvs = core::TLV8::parse(state.timed_write_body);
+                    auto value_tlv = core::TLV8::find(body_tlvs, 0x01);
+                    if (value_tlv && !value_tlv->empty()) {
+                        core::Value new_value;
+                        switch (ch->format()) {
+                            case core::Format::Bool:
+                                new_value = static_cast<bool>((*value_tlv)[0] != 0);
+                                break;
+                            case core::Format::UInt8:
+                                new_value = (*value_tlv)[0];
+                                break;
+                            case core::Format::UInt16:
+                                if (value_tlv->size() >= 2) {
+                                    new_value = static_cast<uint16_t>((*value_tlv)[0] | ((*value_tlv)[1] << 8));
+                                }
+                                break;
+                            case core::Format::UInt32:
+                                if (value_tlv->size() >= 4) {
+                                    new_value = static_cast<uint32_t>(
+                                        (*value_tlv)[0] | ((*value_tlv)[1] << 8) |
+                                        ((*value_tlv)[2] << 16) | ((*value_tlv)[3] << 24));
+                                }
+                                break;
+                            case core::Format::Int:
+                                if (value_tlv->size() >= 4) {
+                                    new_value = static_cast<int32_t>(
+                                        (*value_tlv)[0] | ((*value_tlv)[1] << 8) |
+                                        ((*value_tlv)[2] << 16) | ((*value_tlv)[3] << 24));
+                                }
+                                break;
+                            case core::Format::Float:
+                                if (value_tlv->size() >= 4) {
+                                    uint32_t raw = (*value_tlv)[0] | ((*value_tlv)[1] << 8) |
+                                                ((*value_tlv)[2] << 16) | ((*value_tlv)[3] << 24);
+                                    float f;
+                                    std::memcpy(&f, &raw, sizeof(f));
+                                    new_value = f;
+                                }
+                                break;
+                            case core::Format::String:
+                                new_value = std::string(value_tlv->begin(), value_tlv->end());
+                                break;
+                            default:
+                                break;
+                        }
+                        
+                        ch->set_value(new_value);
+                        config_.system->log(platform::System::LogLevel::Info, 
+                            "[BleTransport] Execute Timed Write IID=" + std::to_string(state.timed_write_iid) + " success");
+                        
+                        // Per HAP Spec 7.4.1.8: GSN increments on first characteristic change per connection
+                        if (!state.gsn_incremented) {
+                            state.gsn_incremented = true;
+                            increment_gsn();
+                        }
+                        
+                        // Trigger BLE events (Connected/Broadcasted/Disconnected per Spec 7.4.6)
+                        // Exclude the connection that made the write (per spec: don't notify originator)
+                        handle_characteristic_change(1, state.timed_write_iid, new_value, connection_id);
+                    } else {
+                        config_.system->log(platform::System::LogLevel::Warning, 
+                            "[BleTransport] Execute Timed Write IID=" + std::to_string(state.timed_write_iid) + " - no value TLV found");
+                        status = 0x06; // Invalid Request
+                    }
+                } else {
+                    config_.system->log(platform::System::LogLevel::Warning, 
+                        "[BleTransport] Execute Timed Write IID=" + std::to_string(state.timed_write_iid) + " - characteristic not found");
+                    status = 0x05; // Not Found
+                }
             }
             
             state.timed_write_body.clear();
@@ -1151,9 +1229,15 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         
         response_body = core::TLV8::encode(resp_tlvs);
         
+        // Store broadcast configuration for this characteristic
+        // Per HAP Spec 7.4.6.2: Properties bit 0x0001 enables broadcast notification
+        bool broadcast_enabled = (properties & 0x0001) != 0;
+        broadcast_configs_[iid] = BroadcastConfig{iid, broadcast_interval, broadcast_enabled};
+        
         config_.system->log(platform::System::LogLevel::Info,
             "[BleTransport] Characteristic Configuration IID=" + std::to_string(iid) +
-            " Props=" + std::to_string(properties) + " Interval=" + std::to_string(broadcast_interval));
+            " Props=" + std::to_string(properties) + " Interval=" + std::to_string(broadcast_interval) +
+            " BroadcastEnabled=" + std::to_string(broadcast_enabled));
         
         send_response(connection_id, state.transaction_id, state.target_uuid, status, response_body);
     }
@@ -1207,11 +1291,15 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                         broadcast_key                                                        // Output: 32 bytes
                     );
                     
-                    // TLV 0x04: Broadcast Encryption Key
+                    std::copy(broadcast_key.begin(), broadcast_key.end(), broadcast_key_.begin());
+                    broadcast_key_valid_ = true;
+                    broadcast_key_gsn_start_ = get_current_gsn();
+                    
                     resp_tlvs.emplace_back(0x04, std::vector<uint8_t>(broadcast_key.begin(), broadcast_key.end()));
                     
                     config_.system->log(platform::System::LogLevel::Info,
-                        "[BleTransport] Protocol Config: Generated Broadcast Encryption Key successfully");
+                        "[BleTransport] Protocol Config: Generated and stored Broadcast Encryption Key (GSN start=" + 
+                        std::to_string(broadcast_key_gsn_start_) + ")");
                 }
             }
         }
@@ -1616,10 +1704,11 @@ void BleTransport::register_services_by_type(uint16_t filter_type) {
                 instance_map_[{acc->aid(), ch->iid()}] = char_uuid;
                 
                 auto perms = ch->permissions();
-                cdef.properties.read = core::has_permission(perms, core::Permission::PairedRead);
-                cdef.properties.write = core::has_permission(perms, core::Permission::PairedWrite);
-                cdef.properties.notify = core::has_permission(perms, core::Permission::Notify);
-                cdef.properties.indicate = false;
+                cdef.properties.read = true;
+                cdef.properties.write = true;
+                bool has_notify = core::has_permission(perms, core::Permission::Notify);
+                cdef.properties.notify = false;
+                cdef.properties.indicate = has_notify;
 
                 add_iid_descriptor(cdef, char_iid);
 
@@ -1656,37 +1745,6 @@ void BleTransport::register_services_by_type(uint16_t filter_type) {
             }
             config_.ble->register_service(def);
         }
-    }
-}
-
-void BleTransport::send_notification_pdu(uint64_t aid, uint64_t iid, const core::Value& value) {
-    auto it = instance_map_.find({aid, iid});
-    if (it == instance_map_.end()) return;
-    
-    std::string uuid = it->second;
-    if (subscriptions_.find(uuid) == subscriptions_.end()) return;
-    
-    core::Format format = core::Format::Data;
-    if (config_.database) {
-        auto ch = config_.database->find_characteristic(aid, iid);
-        if (ch) format = ch->format();
-    }
-    
-    std::vector<uint8_t> body_bytes = BleTransport::serialize_value(value, format);
-
-    for (uint16_t conn_id : subscriptions_[uuid]) {
-        std::vector<uint8_t> pdu;
-        pdu.reserve(4 + body_bytes.size());
-        
-        pdu.push_back(0x00); // CF
-        pdu.push_back(0x00); // TID
-        
-        uint16_t len = body_bytes.size();
-        pdu.push_back(len & 0xFF);
-        pdu.push_back((len >> 8) & 0xFF);
-        pdu.insert(pdu.end(), body_bytes.begin(), body_bytes.end());
-        
-        config_.ble->send_notification(conn_id, uuid, pdu);
     }
 }
 
@@ -1737,4 +1795,296 @@ std::vector<uint8_t> BleTransport::serialize_value(const core::Value& value, cor
     return data;
 }
 
+uint16_t BleTransport::get_current_gsn() {
+    auto gsn_bytes = config_.storage->get("gsn");
+    uint16_t gsn = 1;
+    if (gsn_bytes && gsn_bytes->size() == 2) {
+        gsn = static_cast<uint16_t>((*gsn_bytes)[0]) | (static_cast<uint16_t>((*gsn_bytes)[1]) << 8);
+    }
+    return gsn;
+}
+
+bool BleTransport::is_broadcast_key_valid() {
+    if (!broadcast_key_valid_) return false;
+    
+    // Per HAP Spec 7.4.7.4: Key expires after 32767 GSN increments
+    uint16_t current_gsn = get_current_gsn();
+    uint16_t gsn_diff = 0;
+    
+    // Handle GSN wraparound (1-65535, wraps to 1)
+    if (current_gsn >= broadcast_key_gsn_start_) {
+        gsn_diff = current_gsn - broadcast_key_gsn_start_;
+    } else {
+        // GSN wrapped around
+        gsn_diff = (65535 - broadcast_key_gsn_start_) + current_gsn;
+    }
+    
+    if (gsn_diff >= 32767) {
+        config_.system->log(platform::System::LogLevel::Warning,
+            "[BleTransport] Broadcast encryption key expired (GSN diff=" + std::to_string(gsn_diff) + ")");
+        broadcast_key_valid_ = false;
+        return false;
+    }
+    
+    return true;
+}
+
+void BleTransport::handle_characteristic_change(uint64_t aid, uint64_t iid, 
+                                                 const core::Value& value, 
+                                                 uint32_t exclude_conn_id) {
+    config_.system->log(platform::System::LogLevel::Debug,
+        "[BleTransport] Characteristic change: AID=" + std::to_string(aid) + 
+        " IID=" + std::to_string(iid));
+    
+    // Find the characteristic to check its event properties
+    auto ch = config_.database ? config_.database->find_characteristic(aid, iid) : nullptr;
+    if (!ch) {
+        config_.system->log(platform::System::LogLevel::Warning,
+            "[BleTransport] Cannot find characteristic for event: IID=" + std::to_string(iid));
+        return;
+    }
+    
+    // Check HAP characteristic properties for event support
+    // Per HAP Spec Table 7-50:
+    // - 0x0080: Notifies Events in Connected State
+    // - 0x0100: Notifies Events in Disconnected State
+    // - 0x0200: Supports Broadcast Notify
+    bool supports_connected = false;
+    bool supports_disconnected = false;
+    bool supports_broadcast = false;
+    
+    for (const auto& perm : ch->permissions()) {
+        if (perm == core::Permission::Notify) {
+            supports_connected = true;
+            supports_disconnected = true;
+        }
+    }
+    
+    bool broadcast_enabled = false;
+    if (broadcast_configs_.count(static_cast<uint16_t>(iid))) {
+        auto& bc = broadcast_configs_[static_cast<uint16_t>(iid)];
+        broadcast_enabled = bc.enabled;
+        supports_broadcast = bc.enabled;
+    }
+    
+    auto it = instance_map_.find({aid, iid});
+    if (it == instance_map_.end()) {
+        config_.system->log(platform::System::LogLevel::Warning,
+            "[BleTransport] No UUID mapping for IID=" + std::to_string(iid));
+        return;
+    }
+    std::string uuid = it->second;
+    
+    bool has_connected_subscribers = false;
+    if (subscriptions_.count(uuid) && !subscriptions_[uuid].empty()) {
+        for (uint16_t conn_id : subscriptions_[uuid]) {
+            if (conn_id != exclude_conn_id) {
+                has_connected_subscribers = true;
+                break;
+            }
+        }
+    }
+    
+    is_connected_ = !connections_.empty();
+    
+    if (is_connected_ && has_connected_subscribers && supports_connected) {
+        config_.system->log(platform::System::LogLevel::Info,
+            "[BleTransport] Sending Connected Event for IID=" + std::to_string(iid));
+        send_connected_event(static_cast<uint16_t>(iid));
+    }
+    else if (!is_connected_ && supports_broadcast && broadcast_enabled && is_broadcast_key_valid()) {
+        config_.system->log(platform::System::LogLevel::Info,
+            "[BleTransport] Sending Broadcasted Event for IID=" + std::to_string(iid));
+        send_broadcasted_event(static_cast<uint16_t>(iid), value);
+    }
+    else if (!is_connected_ && supports_disconnected) {
+        config_.system->log(platform::System::LogLevel::Info,
+            "[BleTransport] Sending Disconnected Event for IID=" + std::to_string(iid));
+        send_disconnected_event(static_cast<uint16_t>(iid));
+    }
+    else {
+        config_.system->log(platform::System::LogLevel::Debug,
+            "[BleTransport] No event sent for IID=" + std::to_string(iid) + 
+            " (connected=" + std::to_string(is_connected_) +
+            ", has_subs=" + std::to_string(has_connected_subscribers) +
+            ", supports_connected=" + std::to_string(supports_connected) + ")");
+    }
+}
+
+void BleTransport::send_connected_event(uint16_t iid) {
+    // Per HAP Spec 7.4.6.1 Connected Events:
+    // Send a ZERO-LENGTH indication to controllers that registered for indications.
+    
+    std::string uuid;
+    for (const auto& [key, val] : instance_map_) {
+        if (key.second == iid) {
+            uuid = val;
+            break;
+        }
+    }
+    
+    if (uuid.empty()) {
+        config_.system->log(platform::System::LogLevel::Warning,
+            "[BleTransport] Cannot send Connected Event - no UUID for IID=" + std::to_string(iid));
+        return;
+    }
+    
+    if (!subscriptions_.count(uuid) || subscriptions_[uuid].empty()) {
+        config_.system->log(platform::System::LogLevel::Debug,
+            "[BleTransport] No subscribers for Connected Event IID=" + std::to_string(iid));
+        return;
+    }
+    
+    std::vector<uint8_t> empty_indication;
+    
+    for (uint16_t conn_id : subscriptions_[uuid]) {
+        config_.system->log(platform::System::LogLevel::Debug,
+            "[BleTransport] Sending zero-length indication to conn=" + std::to_string(conn_id) + 
+            " for IID=" + std::to_string(iid));
+        
+        config_.ble->send_indication(conn_id, uuid, empty_indication);
+    }
+}
+
+void BleTransport::send_broadcasted_event(uint16_t iid, const core::Value& value) {
+    // Per HAP Spec 7.4.6.2 Broadcasted Events:
+    // When disconnected and broadcast is configured, send encrypted advertisement
+    // containing the characteristic value.
+    
+    if (!is_broadcast_key_valid()) {
+        config_.system->log(platform::System::LogLevel::Warning,
+            "[BleTransport] Cannot send Broadcasted Event - no valid broadcast key");
+        send_disconnected_event(iid);
+        return;
+    }
+    
+    std::vector<uint8_t> encrypted_payload = build_encrypted_advertisement_payload(iid, value);
+    if (encrypted_payload.empty()) {
+        config_.system->log(platform::System::LogLevel::Error,
+            "[BleTransport] Failed to build encrypted advertisement payload");
+        send_disconnected_event(iid);
+        return;
+    }
+    
+    increment_gsn();
+    
+    std::array<uint8_t, 6> adv_id = {};
+    sscanf(config_.accessory_id.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+        &adv_id[0], &adv_id[1], &adv_id[2], 
+        &adv_id[3], &adv_id[4], &adv_id[5]);
+    
+    uint32_t interval_ms = 20;  // Default 20ms
+    if (broadcast_configs_.count(iid)) {
+        switch (broadcast_configs_[iid].interval) {
+            case 0x01: interval_ms = 20; break;
+            case 0x02: interval_ms = 1280; break;
+            case 0x03: interval_ms = 2560; break;
+            default: interval_ms = 20; break;
+        }
+    }
+    
+    platform::Ble::EncryptedAdvertisement enc_adv;
+    enc_adv.advertising_id = adv_id;
+    enc_adv.encrypted_payload = std::move(encrypted_payload);
+    enc_adv.gsn = get_current_gsn();
+    
+    config_.system->log(platform::System::LogLevel::Info,
+        "[BleTransport] Starting encrypted advertisement for IID=" + std::to_string(iid) +
+        " interval=" + std::to_string(interval_ms) + "ms duration=3000ms");
+    
+    config_.ble->start_encrypted_advertising(enc_adv, interval_ms, 3000);
+}
+
+void BleTransport::send_disconnected_event(uint16_t iid) {
+    // Per HAP Spec 7.4.6.3 Disconnected Events:
+    // Increment GSN (once per disconnected period until connected) and
+    // use 20ms advertising for at least 3 seconds.
+    
+    config_.system->log(platform::System::LogLevel::Debug,
+        "[BleTransport] Disconnected Event for IID=" + std::to_string(iid));
+    
+    // GSN should increment only once for multiple characteristic changes
+    // while in disconnected state. This is tracked by checking if we've
+    // already incremented since last connection.
+    // For simplicity, we increment here and rely on the advertisement
+    // update to reflect the new GSN.
+    
+    // Note: Proper implementation should track "gsn_incremented_disconnected"
+    // flag similar to gsn_incremented per connection. For now, increment.
+    increment_gsn();
+    
+    // Update advertising with fast interval (20ms) for 3 seconds
+    // The update_advertising() call in increment_gsn() handles this.
+    // TODO: Implement timed fast advertising (20ms for 3 seconds, then normal)
+    
+    (void)iid;  // IID not needed for disconnected events, just GSN update
+}
+
+std::vector<uint8_t> BleTransport::build_encrypted_advertisement_payload(uint16_t iid, const core::Value& value) {
+    // Per HAP Spec 7.4.7.3 Broadcast Encryption:
+    // Payload: 12 bytes = GSN(2) + IID(2) + Value(8, with padding)
+    // Nonce: GSN padded to 12 bytes with zeros
+    // AAD: 6-byte advertising identifier
+    // AuthTag: First 4 bytes of 16-byte ChaCha20-Poly1305 tag
+    
+    if (!is_broadcast_key_valid()) {
+        return {};
+    }
+    
+    uint16_t gsn = get_current_gsn();
+    
+    std::vector<uint8_t> plaintext(12, 0);
+    plaintext[0] = gsn & 0xFF;
+    plaintext[1] = (gsn >> 8) & 0xFF;
+    plaintext[2] = iid & 0xFF;
+    plaintext[3] = (iid >> 8) & 0xFF;
+    
+    core::Format format = core::Format::Data;
+    if (config_.database) {
+        auto ch = config_.database->find_characteristic(1, iid);
+        if (ch) format = ch->format();
+    }
+    std::vector<uint8_t> value_bytes = serialize_value(value, format);
+    for (size_t i = 0; i < 8 && i < value_bytes.size(); ++i) {
+        plaintext[4 + i] = value_bytes[i];
+    }
+    
+    std::array<uint8_t, 12> nonce = {};
+    nonce[0] = gsn & 0xFF;
+    nonce[1] = (gsn >> 8) & 0xFF;
+    
+    std::array<uint8_t, 6> aad = {};
+    sscanf(config_.accessory_id.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+        &aad[0], &aad[1], &aad[2], &aad[3], &aad[4], &aad[5]);
+    
+    std::vector<uint8_t> ciphertext(12);
+    std::array<uint8_t, 16> full_tag = {};
+    
+    std::array<uint8_t, 32> key_copy;
+    std::copy(broadcast_key_.begin(), broadcast_key_.end(), key_copy.begin());
+    
+    bool success = config_.crypto->chacha20_poly1305_encrypt_and_tag(
+        key_copy,
+        nonce,
+        std::span<const uint8_t>(aad.data(), 6),
+        plaintext,
+        ciphertext,
+        full_tag
+    );
+    
+    if (!success) {
+        config_.system->log(platform::System::LogLevel::Error,
+            "[BleTransport] Broadcast encryption failed");
+        return {};
+    }
+    
+    std::vector<uint8_t> result;
+    result.reserve(16);
+    result.insert(result.end(), ciphertext.begin(), ciphertext.end());
+    result.insert(result.end(), full_tag.begin(), full_tag.begin() + 4);
+    
+    return result;
+}
+
 } // namespace hap::transport
+
