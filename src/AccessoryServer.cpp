@@ -117,14 +117,14 @@ void AccessoryServer::add_accessory(std::shared_ptr<core::Accessory> accessory) 
     database_.add_accessory(accessory);
     
     // Register event callbacks
+    uint64_t aid = accessory->aid();
     for (const auto& service : accessory->services()) {
         for (const auto& characteristic : service->characteristics()) {
             if (core::has_permission(characteristic->permissions(), core::Permission::Notify)) {
-                uint64_t aid = accessory->aid();
-                uint64_t iid = characteristic->iid();
-                
-                characteristic->set_event_callback([this, aid, iid](const core::Value& value, const core::EventSource& source) {
-                    uint32_t exclude_id = 0;
+                auto ch_ptr = characteristic.get();
+                characteristic->set_event_callback([this, aid, ch_ptr](const core::Value& value, const core::EventSource& source) {
+                    uint64_t iid = ch_ptr->iid();
+                    uint32_t exclude_id = UINT32_MAX;
                     if (source.type == core::EventSource::Type::Connection) {
                         exclude_id = source.id;
                     }

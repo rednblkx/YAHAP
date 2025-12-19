@@ -15,6 +15,15 @@ public:
     AttributeDatabase() = default;
 
     void add_accessory(std::shared_ptr<Accessory> accessory) {
+        uint64_t next_iid = 1;
+        
+        for (const auto& service : accessory->services()) {
+            service->set_iid(next_iid++);
+            for (const auto& characteristic : service->characteristics()) {
+                characteristic->set_iid(next_iid++);
+            }
+        }
+        
         accessories_.push_back(std::move(accessory));
     }
 
