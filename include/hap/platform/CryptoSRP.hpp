@@ -4,6 +4,7 @@
 #include <memory>
 #include <array>
 #include <string>
+#include <vector>
 
 namespace hap::platform {
 

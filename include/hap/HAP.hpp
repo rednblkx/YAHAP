@@ -5,5 +5,3 @@
 #include "hap/platform/Storage.hpp"
 #include "hap/platform/System.hpp"
 #include "hap/platform/Ble.hpp"
-
-// Core includes will be added here

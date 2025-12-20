@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <cstring>
 #include "hap/core/TLV8.hpp"
-#include <cinttypes>
 
 static std::string to_hex_string(const uint8_t* data, size_t len) {
     std::string s;

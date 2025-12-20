@@ -1,10 +1,7 @@
 #pragma once
 
 #include <span>
-#include <vector>
 #include <cstdint>
-#include <optional>
-#include <memory>
 
 namespace hap::platform {
 

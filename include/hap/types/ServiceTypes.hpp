@@ -19,7 +19,6 @@
 
 #include "hap/core/Service.hpp"
 #include "hap/core/Characteristic.hpp"
-#include "hap/types/CharacteristicTypes.hpp"
 #include <memory>
 #include <string>
 #include <functional>

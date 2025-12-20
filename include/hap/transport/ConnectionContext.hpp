@@ -2,6 +2,7 @@
 
 #include "hap/transport/SecureSession.hpp"
 #include "hap/platform/System.hpp"
+#include <memory>
 #include <optional>
 #include <set>
 #include <utility>

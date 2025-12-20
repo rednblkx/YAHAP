@@ -5,7 +5,6 @@
 #include "hap/core/HAPStatus.hpp"
 #include <nlohmann/json.hpp>
 #include <sstream>
-#include <iomanip>
 
 namespace hap::core {
 

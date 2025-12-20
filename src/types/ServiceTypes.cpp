@@ -4,6 +4,7 @@
  */
 
 #include "hap/types/ServiceTypes.hpp"
+#include "hap/types/CharacteristicTypes.hpp"
 
 namespace hap::service {
 

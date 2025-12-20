@@ -1,6 +1,5 @@
 #include "hap/pairing/PairSetup.hpp"
 #include <algorithm>
-#include <cstring>
 #include <nlohmann/json.hpp>
 
 namespace hap::pairing {
