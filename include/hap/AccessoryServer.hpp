@@ -6,8 +6,6 @@
 #include "hap/platform/Storage.hpp"
 #include "hap/platform/System.hpp"
 #include "hap/platform/Ble.hpp"
-#include "hap/transport/HTTP.hpp"
-#include "hap/types/ServiceTypes.hpp"
 
 #include <memory>
 #include <string>

@@ -1162,7 +1162,8 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                                 break;
                         }
                         
-                        ch->set_value(new_value);
+                        // Pass EventSource so the originating connection is excluded from notifications
+                        ch->set_value(new_value, core::EventSource::from_connection(connection_id));
                         config_.system->log(platform::System::LogLevel::Info, 
                             "[BleTransport] Execute Timed Write IID=" + std::to_string(state.timed_write_iid) + " success");
                         
@@ -1172,9 +1173,6 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                             increment_gsn();
                         }
                         
-                        // Trigger BLE events (Connected/Broadcasted/Disconnected per Spec 7.4.6)
-                        // Exclude the connection that made the write (per spec: don't notify originator)
-                        handle_characteristic_change(1, state.timed_write_iid, new_value, connection_id);
                     } else {
                         config_.system->log(platform::System::LogLevel::Warning, 
                             "[BleTransport] Execute Timed Write IID=" + std::to_string(state.timed_write_iid) + " - no value TLV found");
