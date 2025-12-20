@@ -48,9 +48,6 @@ static void parse_uuid(const std::string& uuid_str, ble_uuid_any_t* uuid) {
 }
 
 Esp32Ble::Esp32Ble() {
-}
-
-void Esp32Ble::init() {
 #if CONFIG_IDF_TARGET_ESP32
     ESP_ERROR_CHECK(esp_nimble_hci_init());
 #endif
@@ -86,10 +83,6 @@ void Esp32Ble::init() {
     };
     
     ble_svc_gap_device_name_set("HAP Accessory");
-}
-
-void Esp32Ble::run() {
-    // Start task
     nimble_port_freertos_init([](void* arg){
         nimble_port_run();
         nimble_port_freertos_deinit();

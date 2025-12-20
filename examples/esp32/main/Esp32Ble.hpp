@@ -23,9 +23,6 @@ public:
                                   uint32_t fast_duration_ms,
                                   uint32_t normal_interval_ms) override;
 
-    void init();
-    void run();
-
 private:
     static int ble_gap_event(struct ble_gap_event *event, void *arg);
     static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt *ctxt, void *arg);

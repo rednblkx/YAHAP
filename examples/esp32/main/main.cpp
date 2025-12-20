@@ -27,10 +27,6 @@ extern "C" void app_main() {
     static Esp32Crypto crypto_impl;
     static Esp32Ble ble_impl;
 
-    ESP_LOGI(TAG, "Initializing BLE...");
-    ble_impl.init();
-
-    // Create Accessory Server
     hap::AccessoryServer::Config config;
     config.system = &system_impl;
     config.storage = &storage_impl;
@@ -45,7 +41,6 @@ extern "C" void app_main() {
 
     static hap::AccessoryServer server(std::move(config));
 
-    // Create Accessory using new simplified builders
     auto accessory = std::make_shared<hap::core::Accessory>(1);
 
     // Accessory Information Service
@@ -79,9 +74,4 @@ extern "C" void app_main() {
 
     ESP_LOGI(TAG, "Starting Server...");
     server.start();
-    
-    ESP_LOGI(TAG, "Starting BLE Loop...");
-    ble_impl.run();
-
-    ESP_LOGI(TAG, "Main loop running");
 }
