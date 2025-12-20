@@ -6,6 +6,42 @@ using json = nlohmann::json;
 
 namespace hap::transport {
 
+static std::vector<uint8_t> base64_decode(const std::string& encoded) {
+    static constexpr unsigned char decode_table[] = {
+        64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+        64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+        64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 62, 64, 64, 64, 63,
+        52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 64, 64, 64, 64, 64, 64,
+        64,  0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14,
+        15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 64, 64, 64, 64, 64,
+        64, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+        41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 64, 64, 64, 64, 64
+    };
+
+    std::vector<uint8_t> result;
+    result.reserve(encoded.size() * 3 / 4);
+
+    uint32_t buffer = 0;
+    int bits_collected = 0;
+
+    for (char c : encoded) {
+        if (c == '=' || c == '\0') break;
+        if (static_cast<unsigned char>(c) >= 128) continue;
+        unsigned char d = decode_table[static_cast<unsigned char>(c)];
+        if (d == 64) continue;
+
+        buffer = (buffer << 6) | d;
+        bits_collected += 6;
+
+        if (bits_collected >= 8) {
+            bits_collected -= 8;
+            result.push_back(static_cast<uint8_t>((buffer >> bits_collected) & 0xFF));
+        }
+    }
+
+    return result;
+}
+
 AccessoryEndpoints::AccessoryEndpoints(core::AttributeDatabase* database) 
     : database_(database) {}
 
@@ -233,8 +269,13 @@ Response AccessoryEndpoints::handle_put_characteristics(const Request& req, Conn
                             
                         case core::Format::TLV8:
                         case core::Format::Data:
-                            // Not supported for write yet
-                            valid_value = false;
+                            if (value_json.is_string()) {
+                                std::string b64_str = value_json.get<std::string>();
+                                std::vector<uint8_t> data = base64_decode(b64_str);
+                                characteristic->set_value(data, source);
+                            } else {
+                                valid_value = false;
+                            }
                             break;
                     }
                 
