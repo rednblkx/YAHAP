@@ -83,6 +83,9 @@ Esp32Ble::Esp32Ble() {
     };
     
     ble_svc_gap_device_name_set("HAP Accessory");
+}
+
+void Esp32Ble::start() {
     nimble_port_freertos_init([](void* arg){
         nimble_port_run();
         nimble_port_freertos_deinit();

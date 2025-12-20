@@ -117,6 +117,8 @@ void BleTransport::start() {
     register_user_services();
     
     update_advertising();
+    
+    config_.ble->start();
 }
 
 void BleTransport::stop() {

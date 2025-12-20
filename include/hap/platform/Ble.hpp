@@ -33,6 +33,8 @@ struct Ble {
         std::optional<std::string> local_name;
     };
 
+    virtual void start() = 0;
+
     /**
      * @brief Start BLE advertising with the given data.
      * @param data The advertisement payload and configuration.

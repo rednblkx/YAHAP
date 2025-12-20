@@ -22,6 +22,7 @@ public:
                                   uint32_t fast_interval_ms,
                                   uint32_t fast_duration_ms,
                                   uint32_t normal_interval_ms) override;
+    void start() override;
 
 private:
     static int ble_gap_event(struct ble_gap_event *event, void *arg);
