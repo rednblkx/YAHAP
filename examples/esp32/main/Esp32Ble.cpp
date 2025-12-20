@@ -142,8 +142,8 @@ void Esp32Ble::start_advertising(const Advertisement& data, uint32_t interval_ms
     memset(&adv_params, 0, sizeof adv_params);
     adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
     adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
-    adv_params.itvl_min = interval_ms * 1000 / 625;
-    adv_params.itvl_max = interval_ms * 1000 / 625;
+    adv_params.itvl_min = BLE_GAP_ADV_ITVL_MS(interval_ms);
+    adv_params.itvl_max = BLE_GAP_ADV_ITVL_MS(interval_ms);
     
     ble_gap_adv_stop();
     

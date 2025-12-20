@@ -448,7 +448,7 @@ void BleTransport::update_advertising() {
         " GSN=" + std::to_string(gsn) +
         " CN=" + std::to_string(config_number));
 
-    config_.ble->start_advertising(adv);
+    config_.ble->start_advertising(adv, config_.ble->interval_config.normal_interval_ms);
 }
 
 void BleTransport::set_accessory_id(const std::string& new_id) {
@@ -2046,10 +2046,17 @@ void BleTransport::send_disconnected_event(uint16_t iid) {
         status_flags, device_id, config_.category_id, gsn, config_number, setup_hash);
     adv.local_name = config_.device_name;
     
-    // Per HAP Spec 7.4.6.3: Use 20ms for 3 seconds, then normal interval (1000ms)
+    // Per HAP Spec 7.4.6.3: Use fast interval (20 ms) for 3 seconds, then normal interval
     config_.system->log(platform::System::LogLevel::Info,
-        "[BleTransport] Starting timed advertising for Disconnected Event (20ms for 3s)");
-    config_.ble->start_timed_advertising(adv, 20, 3000, 1000);
+        "[BleTransport] Starting timed advertising for Disconnected Event (" + 
+        std::to_string(config_.ble->interval_config.fast_interval_ms) + "ms for " +
+        std::to_string(config_.ble->interval_config.fast_duration_ms) + "ms)");
+    config_.ble->start_timed_advertising(
+        adv, 
+        config_.ble->interval_config.fast_interval_ms,
+        config_.ble->interval_config.fast_duration_ms,
+        config_.ble->interval_config.normal_interval_ms
+    );
     
     (void)iid;
 }

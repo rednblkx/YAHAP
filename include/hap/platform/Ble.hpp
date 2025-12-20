@@ -17,6 +17,18 @@ namespace hap::platform {
 struct Ble {
     virtual ~Ble() = default;
 
+    /**
+     * @brief Configuration for BLE advertising intervals.
+     * 
+     * Per HAP Spec 7.4.6.3: Fast advertising (20ms) is used for 3 seconds
+     * after state changes, then reverts to normal interval.
+     */
+    struct BleIntervalConfig {
+        uint32_t normal_interval_ms = 500;    ///< Normal advertising interval
+        uint32_t fast_interval_ms = 20;       ///< Fast advertising interval (HAP Spec 7.4.6.3)
+        uint32_t fast_duration_ms = 3000;     ///< Duration for fast advertising
+    } interval_config;
+
     struct Advertisement {
         static Advertisement create_hap(
             uint8_t status_flags, 
