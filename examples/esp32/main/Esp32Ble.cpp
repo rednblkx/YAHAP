@@ -87,9 +87,9 @@ Esp32Ble::Esp32Ble() {
 
 void Esp32Ble::start() {
     nimble_port_freertos_init([](void* arg){
-        nimble_port_run();
-        nimble_port_freertos_deinit();
-    });
+      nimble_port_run();
+      nimble_port_freertos_deinit();
+  });
 }
 
 void Esp32Ble::start_advertising(const Advertisement& data, uint32_t interval_ms) {
@@ -305,7 +305,7 @@ void Esp32Ble::register_service(const ServiceDefinition& service) {
     memset(svcs, 0, sizeof(struct ble_gatt_svc_def) * 2);
 
     auto& svc_def = svcs[0];
-    svc_def.type = BLE_GATT_SVC_TYPE_PRIMARY;
+    svc_def.type = service.is_primary ? BLE_GATT_SVC_TYPE_PRIMARY : BLE_GATT_SVC_TYPE_SECONDARY;
     
     auto uuid_svc = new ble_uuid_any_t;
     parse_uuid(service.uuid, uuid_svc);

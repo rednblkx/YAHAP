@@ -28,6 +28,7 @@ public:
     uint64_t type() const { return type_; }
     const std::string& name() const { return name_; }
     bool is_primary() const { return is_primary_; }
+    void set_primary(bool primary) { is_primary_ = primary; }
     
     uint64_t iid() const { return iid_; }
     void set_iid(uint64_t iid) { iid_ = iid; }

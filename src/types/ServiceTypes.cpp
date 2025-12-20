@@ -87,7 +87,7 @@ std::shared_ptr<Service> AccessoryInformationBuilder::build() {
 //==============================================================================
 
 LightBulbBuilder::LightBulbBuilder() {
-    service_ = std::make_shared<Service>(kType_LightBulb, "Lightbulb");
+    service_ = std::make_shared<Service>(kType_LightBulb, "Lightbulb", true);
     
     // Required characteristic
     on_char_ = chr::On();
@@ -157,7 +157,7 @@ std::shared_ptr<Service> LightBulbBuilder::build() {
 //==============================================================================
 
 SwitchBuilder::SwitchBuilder() {
-    service_ = std::make_shared<Service>(kType_Switch, "Switch");
+    service_ = std::make_shared<Service>(kType_Switch, "Switch", true);
     on_char_ = chr::On();
     add_characteristic(on_char_);
 }
@@ -186,7 +186,7 @@ std::shared_ptr<Service> SwitchBuilder::build() {
 //==============================================================================
 
 OutletBuilder::OutletBuilder() {
-    service_ = std::make_shared<Service>(kType_Outlet, "Outlet");
+    service_ = std::make_shared<Service>(kType_Outlet, "Outlet", true);
     
     on_char_ = chr::On();
     outlet_in_use_char_ = chr::OutletInUse();
@@ -219,7 +219,7 @@ std::shared_ptr<Service> OutletBuilder::build() {
 //==============================================================================
 
 ThermostatBuilder::ThermostatBuilder() {
-    service_ = std::make_shared<Service>(kType_Thermostat, "Thermostat");
+    service_ = std::make_shared<Service>(kType_Thermostat, "Thermostat", true);
     
     current_hc_state_ = chr::CurrentHeatingCoolingStateChar();
     target_hc_state_ = chr::TargetHeatingCoolingStateChar();
@@ -268,7 +268,7 @@ std::shared_ptr<Service> ThermostatBuilder::build() {
 //==============================================================================
 
 TemperatureSensorBuilder::TemperatureSensorBuilder() {
-    service_ = std::make_shared<Service>(kType_TemperatureSensor, "Temperature Sensor");
+    service_ = std::make_shared<Service>(kType_TemperatureSensor, "Temperature Sensor", true);
     current_temp_ = chr::CurrentTemperature();
     add_characteristic(current_temp_);
 }
@@ -301,7 +301,7 @@ std::shared_ptr<Service> TemperatureSensorBuilder::build() {
 //==============================================================================
 
 HumiditySensorBuilder::HumiditySensorBuilder() {
-    service_ = std::make_shared<Service>(kType_HumiditySensor, "Humidity Sensor");
+    service_ = std::make_shared<Service>(kType_HumiditySensor, "Humidity Sensor", true);
     current_humidity_ = chr::CurrentRelativeHumidity();
     add_characteristic(current_humidity_);
 }
@@ -334,7 +334,7 @@ std::shared_ptr<Service> HumiditySensorBuilder::build() {
 //==============================================================================
 
 MotionSensorBuilder::MotionSensorBuilder() {
-    service_ = std::make_shared<Service>(kType_MotionSensor, "Motion Sensor");
+    service_ = std::make_shared<Service>(kType_MotionSensor, "Motion Sensor", true);
     motion_detected_ = chr::MotionDetected();
     add_characteristic(motion_detected_);
 }
@@ -367,7 +367,7 @@ std::shared_ptr<Service> MotionSensorBuilder::build() {
 //==============================================================================
 
 ContactSensorBuilder::ContactSensorBuilder() {
-    service_ = std::make_shared<Service>(kType_ContactSensor, "Contact Sensor");
+    service_ = std::make_shared<Service>(kType_ContactSensor, "Contact Sensor", true);
     contact_state_ = chr::ContactSensorStateChar();
     add_characteristic(contact_state_);
 }
@@ -400,7 +400,7 @@ std::shared_ptr<Service> ContactSensorBuilder::build() {
 //==============================================================================
 
 GarageDoorOpenerBuilder::GarageDoorOpenerBuilder() {
-    service_ = std::make_shared<Service>(kType_GarageDoorOpener, "Garage Door Opener");
+    service_ = std::make_shared<Service>(kType_GarageDoorOpener, "Garage Door Opener", true);
     
     current_door_state_ = chr::CurrentDoorStateChar();
     target_door_state_ = chr::TargetDoorStateChar();
@@ -435,7 +435,8 @@ std::shared_ptr<Service> GarageDoorOpenerBuilder::build() {
 //==============================================================================
 
 LockMechanismBuilder::LockMechanismBuilder() {
-    service_ = std::make_shared<Service>(kType_LockMechanism, "Lock Mechanism");
+    // Lock Mechanism MUST be a primary service per HAP Spec 11.2.1
+    service_ = std::make_shared<Service>(kType_LockMechanism, "Lock Mechanism", true);
     
     lock_current_state_ = chr::LockCurrentStateChar();
     lock_target_state_ = chr::LockTargetStateChar();
@@ -473,7 +474,7 @@ LockManagementBuilder::LockManagementBuilder() {
     // Required characteristics
     lock_control_point_ = chr::LockControlPoint();
     version_ = chr::Version();
-    version_->set_value(std::string("1.0")); // HAP Spec 11.2.2.2 requires "1.0"
+    version_->set_value(std::string("1.0")); // HAP Spec 11.2.2.2: "The value of this characteristic must be the string '1.0'."
     
     add_characteristic(lock_control_point_);
     add_characteristic(version_);
@@ -530,7 +531,7 @@ std::shared_ptr<Service> LockManagementBuilder::build() {
 //==============================================================================
 
 FanBuilder::FanBuilder() {
-    service_ = std::make_shared<Service>(kType_Fan_v2, "Fan");
+    service_ = std::make_shared<Service>(kType_Fan_v2, "Fan", true);
     active_char_ = chr::ActiveChar();
     add_characteristic(active_char_);
 }
@@ -583,7 +584,7 @@ std::shared_ptr<Service> FanBuilder::build() {
 //==============================================================================
 
 WindowCoveringBuilder::WindowCoveringBuilder() {
-    service_ = std::make_shared<Service>(kType_WindowCovering, "Window Covering");
+    service_ = std::make_shared<Service>(kType_WindowCovering, "Window Covering", true);
     
     current_position_ = chr::CurrentPosition();
     target_position_ = chr::TargetPosition();
@@ -649,7 +650,7 @@ std::shared_ptr<Service> BatteryServiceBuilder::build() {
 //==============================================================================
 
 SecuritySystemBuilder::SecuritySystemBuilder() {
-    service_ = std::make_shared<Service>(kType_SecuritySystem, "Security System");
+    service_ = std::make_shared<Service>(kType_SecuritySystem, "Security System", true);
     
     current_state_ = chr::SecuritySystemCurrentStateChar();
     target_state_ = chr::SecuritySystemTargetStateChar();
@@ -692,7 +693,7 @@ std::shared_ptr<Service> SecuritySystemBuilder::build() {
 //==============================================================================
 
 DoorBuilder::DoorBuilder() {
-    service_ = std::make_shared<Service>(kType_Door, "Door");
+    service_ = std::make_shared<Service>(kType_Door, "Door", true);
     
     current_position_ = chr::CurrentPosition();
     target_position_ = chr::TargetPosition();
@@ -729,7 +730,7 @@ std::shared_ptr<Service> DoorBuilder::build() {
 //==============================================================================
 
 OccupancySensorBuilder::OccupancySensorBuilder() {
-    service_ = std::make_shared<Service>(kType_OccupancySensor, "Occupancy Sensor");
+    service_ = std::make_shared<Service>(kType_OccupancySensor, "Occupancy Sensor", true);
     
     occupancy_detected_ = chr::OccupancyDetected();
     add_characteristic(occupancy_detected_);
@@ -761,7 +762,7 @@ std::shared_ptr<Service> OccupancySensorBuilder::build() {
 //==============================================================================
 
 SmokeSensorBuilder::SmokeSensorBuilder() {
-    service_ = std::make_shared<Service>(kType_SmokeSensor, "Smoke Sensor");
+    service_ = std::make_shared<Service>(kType_SmokeSensor, "Smoke Sensor", true);
     
     smoke_detected_ = chr::SmokeDetected();
     add_characteristic(smoke_detected_);
@@ -793,7 +794,7 @@ std::shared_ptr<Service> SmokeSensorBuilder::build() {
 //==============================================================================
 
 LeakSensorBuilder::LeakSensorBuilder() {
-    service_ = std::make_shared<Service>(kType_LeakSensor, "Leak Sensor");
+    service_ = std::make_shared<Service>(kType_LeakSensor, "Leak Sensor", true);
     
     leak_detected_ = chr::LeakDetected();
     add_characteristic(leak_detected_);
@@ -825,7 +826,7 @@ std::shared_ptr<Service> LeakSensorBuilder::build() {
 //==============================================================================
 
 LightSensorBuilder::LightSensorBuilder() {
-    service_ = std::make_shared<Service>(kType_LightSensor, "Light Sensor");
+    service_ = std::make_shared<Service>(kType_LightSensor, "Light Sensor", true);
     
     current_light_level_ = chr::CurrentAmbientLightLevel();
     add_characteristic(current_light_level_);
@@ -857,7 +858,7 @@ std::shared_ptr<Service> LightSensorBuilder::build() {
 //==============================================================================
 
 CarbonDioxideSensorBuilder::CarbonDioxideSensorBuilder() {
-    service_ = std::make_shared<Service>(kType_CarbonDioxideSensor, "Carbon Dioxide Sensor");
+    service_ = std::make_shared<Service>(kType_CarbonDioxideSensor, "Carbon Dioxide Sensor", true);
     
     co2_detected_ = chr::CarbonDioxideDetectedChar();
     add_characteristic(co2_detected_);
@@ -890,7 +891,8 @@ std::shared_ptr<Service> CarbonDioxideSensorBuilder::build() {
 //==============================================================================
 
 DoorbellBuilder::DoorbellBuilder() {
-    service_ = std::make_shared<Service>(kType_Doorbell, "Doorbell");
+    // Doorbell is the primary service for Video Doorbell Profile per HAP Spec
+    service_ = std::make_shared<Service>(kType_Doorbell, "Doorbell", true);
     
     switch_event_ = chr::ProgrammableSwitchEventChar();
     add_characteristic(switch_event_);
@@ -922,7 +924,7 @@ std::shared_ptr<Service> DoorbellBuilder::build() {
 //==============================================================================
 
 AirPurifierBuilder::AirPurifierBuilder() {
-    service_ = std::make_shared<Service>(kType_AirPurifier, "Air Purifier");
+    service_ = std::make_shared<Service>(kType_AirPurifier, "Air Purifier", true);
     
     active_ = chr::ActiveChar();
     current_state_ = chr::CurrentAirPurifierStateChar();
@@ -964,7 +966,7 @@ std::shared_ptr<Service> AirPurifierBuilder::build() {
 //==============================================================================
 
 HeaterCoolerBuilder::HeaterCoolerBuilder() {
-    service_ = std::make_shared<Service>(kType_HeaterCooler, "Heater Cooler");
+    service_ = std::make_shared<Service>(kType_HeaterCooler, "Heater Cooler", true);
     
     active_ = chr::ActiveChar();
     current_temp_ = chr::CurrentTemperature();
@@ -1013,7 +1015,7 @@ std::shared_ptr<Service> HeaterCoolerBuilder::build() {
 //==============================================================================
 
 HumidifierDehumidifierBuilder::HumidifierDehumidifierBuilder() {
-    service_ = std::make_shared<Service>(kType_HumidifierDehumidifier, "Humidifier Dehumidifier");
+    service_ = std::make_shared<Service>(kType_HumidifierDehumidifier, "Humidifier Dehumidifier", true);
     
     active_ = chr::ActiveChar();
     current_humidity_ = chr::CurrentRelativeHumidity();
@@ -1125,7 +1127,7 @@ std::shared_ptr<Service> SlatBuilder::build() {
 //==============================================================================
 
 ValveBuilder::ValveBuilder() {
-    service_ = std::make_shared<Service>(kType_Valve, "Valve");
+    service_ = std::make_shared<Service>(kType_Valve, "Valve", true);
     
     active_ = chr::ActiveChar();
     in_use_ = chr::InUseChar();
@@ -1163,7 +1165,7 @@ std::shared_ptr<Service> ValveBuilder::build() {
 //==============================================================================
 
 IrrigationSystemBuilder::IrrigationSystemBuilder() {
-    service_ = std::make_shared<Service>(kType_IrrigationSystem, "Irrigation System");
+    service_ = std::make_shared<Service>(kType_IrrigationSystem, "Irrigation System", true);
     
     active_ = chr::ActiveChar();
     program_mode_ = chr::ProgramMode();
@@ -1195,7 +1197,7 @@ std::shared_ptr<Service> IrrigationSystemBuilder::build() {
 //==============================================================================
 
 FaucetBuilder::FaucetBuilder() {
-    service_ = std::make_shared<Service>(kType_Faucet, "Faucet");
+    service_ = std::make_shared<Service>(kType_Faucet, "Faucet", true);
     
     active_ = chr::ActiveChar();
     add_characteristic(active_);
@@ -1237,7 +1239,7 @@ std::shared_ptr<Service> ServiceLabelBuilder::build() {
 //==============================================================================
 
 CarbonMonoxideSensorBuilder::CarbonMonoxideSensorBuilder() {
-    service_ = std::make_shared<Service>(kType_CarbonMonoxideSensor, "Carbon Monoxide Sensor");
+    service_ = std::make_shared<Service>(kType_CarbonMonoxideSensor, "Carbon Monoxide Sensor", true);
     
     co_detected_ = chr::CarbonMonoxideDetectedChar();
     add_characteristic(co_detected_);
@@ -1270,7 +1272,7 @@ std::shared_ptr<Service> CarbonMonoxideSensorBuilder::build() {
 //==============================================================================
 
 AirQualitySensorBuilder::AirQualitySensorBuilder() {
-    service_ = std::make_shared<Service>(kType_AirQualitySensor, "Air Quality Sensor");
+    service_ = std::make_shared<Service>(kType_AirQualitySensor, "Air Quality Sensor", true);
     
     air_quality_ = chr::AirQualityChar();
     add_characteristic(air_quality_);
@@ -1312,7 +1314,7 @@ std::shared_ptr<Service> AirQualitySensorBuilder::build() {
 //==============================================================================
 
 StatelessProgrammableSwitchBuilder::StatelessProgrammableSwitchBuilder() {
-    service_ = std::make_shared<Service>(kType_StatelessProgrammableSwitch, "Stateless Programmable Switch");
+    service_ = std::make_shared<Service>(kType_StatelessProgrammableSwitch, "Stateless Programmable Switch", true);
     
     switch_event_ = chr::ProgrammableSwitchEventChar();
     add_characteristic(switch_event_);
@@ -1341,7 +1343,7 @@ std::shared_ptr<Service> StatelessProgrammableSwitchBuilder::build() {
 //==============================================================================
 
 MicrophoneBuilder::MicrophoneBuilder() {
-    service_ = std::make_shared<Service>(kType_Microphone, "Microphone");
+    service_ = std::make_shared<Service>(kType_Microphone, "Microphone", true);
     
     mute_ = chr::Mute();
     add_characteristic(mute_);
@@ -1368,7 +1370,7 @@ std::shared_ptr<Service> MicrophoneBuilder::build() {
 //==============================================================================
 
 SpeakerBuilder::SpeakerBuilder() {
-    service_ = std::make_shared<Service>(kType_Speaker, "Speaker");
+    service_ = std::make_shared<Service>(kType_Speaker, "Speaker", true);
     
     mute_ = chr::Mute();
     add_characteristic(mute_);
