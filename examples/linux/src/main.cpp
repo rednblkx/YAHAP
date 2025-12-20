@@ -49,7 +49,7 @@ int main() {
     config.port = 8080;
     // config.accessory_id = "11:64:46:32:20:24"; // Auto-generated if empty
     config.setup_code = "111-22-333";
-    config.category_id = hap::service::AccessoryCategory::DoorLock;
+    config.category_id = hap::core::AccessoryCategory::DoorLock;
     
     // Create Accessory using new simplified builders
     auto accessory = std::make_shared<hap::core::Accessory>(1);

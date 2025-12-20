@@ -78,50 +78,6 @@ constexpr uint64_t kType_AudioStreamManagement = 0x127;     // 9.44
 constexpr uint64_t kType_DataStreamTransportManagement = 0x129; // 9.45
 constexpr uint64_t kType_Siri = 0x133;                      // 9.46
 
-
-//==============================================================================
-// Accessory Category Constants (HAP Spec R13 Section 13.2)
-//==============================================================================
-
-enum class AccessoryCategory : uint16_t {
-    Other = 1,
-    Bridge = 2,
-    Fan = 3,
-    GarageDoorOpener = 4,
-    Lightbulb = 5,
-    DoorLock = 6,
-    Outlet = 7,
-    Switch = 8,
-    Thermostat = 9,
-    Sensor = 10,
-    SecuritySystem = 11,
-    Door = 12,
-    Window = 13,
-    WindowCovering = 14,
-    ProgrammableSwitch = 15,
-    RangeExtender = 16,
-    IPCamera = 17,
-    VideoDoorbell = 18,
-    AirPurifier = 19,
-    Heater = 20,
-    AirConditioner = 21,
-    Humidifier = 22,
-    Dehumidifier = 23,
-    AppleTV = 24,
-    HomePodMini = 25,
-    Speaker = 26,
-    AirPort = 27,
-    Sprinkler = 28,
-    Faucet = 29,
-    ShowerSystem = 30,
-    Television = 31,
-    RemoteControl = 32,
-    WiFiRouter = 33,
-    AudioReceiver = 34,
-    TVSetTopBox = 35,
-    TVStreamingStick = 36
-};
-
 //==============================================================================
 // Service Builder Base Class
 //==============================================================================

@@ -41,6 +41,7 @@ extern "C" void app_main() {
     config.device_name = "ESP32-Lightbulb-1";
     // config.accessory_id = "11:64:46:32:20:24"; // Auto-generated if empty
     config.setup_code = "111-22-333";
+    config.category_id = hap::core::AccessoryCategory::DoorLock;
 
     static hap::AccessoryServer server(std::move(config));
 
