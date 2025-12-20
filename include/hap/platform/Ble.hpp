@@ -174,6 +174,27 @@ struct Ble {
      * @return true if at least one client is connected.
      */
     virtual bool has_connections() const { return false; }
+
+    /**
+     * @brief Start timed advertising with automatic fallback to normal interval.
+     * 
+     * Per HAP Spec 7.4.6.3 Disconnected Events: After updating GSN, the accessory
+     * must use 20ms advertising for at least 3 seconds, then revert to normal.
+     * 
+     * @param data The advertisement payload.
+     * @param fast_interval_ms Fast interval to use initially (typically 20ms).
+     * @param fast_duration_ms Duration for fast advertising (typically 3000ms).
+     * @param normal_interval_ms Normal interval to revert to after fast period.
+     */
+    virtual void start_timed_advertising(const Advertisement& data,
+                                          uint32_t fast_interval_ms = 20,
+                                          uint32_t fast_duration_ms = 3000,
+                                          uint32_t normal_interval_ms = 1000) {
+        // Default implementation: just use fast interval (platforms override for timer support)
+        start_advertising(data, fast_interval_ms);
+        (void)fast_duration_ms;
+        (void)normal_interval_ms;
+    }
 };
 
 } // namespace hap::platform

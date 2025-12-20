@@ -1998,26 +1998,58 @@ void BleTransport::send_broadcasted_event(uint16_t iid, const core::Value& value
 void BleTransport::send_disconnected_event(uint16_t iid) {
     // Per HAP Spec 7.4.6.3 Disconnected Events:
     // Increment GSN (once per disconnected period until connected) and
-    // use 20ms advertising for at least 3 seconds.
+    // use 20ms advertising for at least 3 seconds, then revert to normal.
     
     config_.system->log(platform::System::LogLevel::Debug,
         "[BleTransport] Disconnected Event for IID=" + std::to_string(iid));
     
-    // GSN should increment only once for multiple characteristic changes
-    // while in disconnected state. This is tracked by checking if we've
-    // already incremented since last connection.
-    // For simplicity, we increment here and rely on the advertisement
-    // update to reflect the new GSN.
-    
-    // Note: Proper implementation should track "gsn_incremented_disconnected"
-    // flag similar to gsn_incremented per connection. For now, increment.
     increment_gsn();
     
-    // Update advertising with fast interval (20ms) for 3 seconds
-    // The update_advertising() call in increment_gsn() handles this.
-    // TODO: Implement timed fast advertising (20ms for 3 seconds, then normal)
+    std::string setup_id;
+    auto setup_id_bytes = config_.storage->get("setup_id");
+    if (setup_id_bytes && setup_id_bytes->size() == 4) {
+        setup_id = std::string(setup_id_bytes->begin(), setup_id_bytes->end());
+    } else {
+        setup_id = "X-HZ";
+    }
     
-    (void)iid;  // IID not needed for disconnected events, just GSN update
+    std::string input = setup_id + config_.accessory_id;
+    std::array<uint8_t, 64> hash_output = {};
+    config_.crypto->sha512(
+        std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(input.data()), input.size()),
+        std::span<uint8_t, 64>(hash_output.data(), 64)
+    );
+    uint8_t setup_hash[4];
+    std::copy_n(hash_output.begin(), 4, setup_hash);
+    
+    auto pairing_list = config_.storage->get("pairing_list");
+    bool is_paired = (pairing_list && pairing_list->size() > 2);
+    uint8_t status_flags = is_paired ? 0x00 : 0x01;
+    
+    uint8_t device_id[6] = {0};
+    sscanf(config_.accessory_id.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+        &device_id[0], &device_id[1], &device_id[2],
+        &device_id[3], &device_id[4], &device_id[5]);
+    
+    uint16_t gsn = get_current_gsn();
+    
+    uint16_t config_number = 1;
+    auto cn_bytes = config_.storage->get("config_number");
+    if (cn_bytes && !cn_bytes->empty()) {
+        std::string cn_str(cn_bytes->begin(), cn_bytes->end());
+        config_number = static_cast<uint16_t>(std::stoi(cn_str));
+    }
+    
+    auto adv = platform::Ble::Advertisement::create_hap(
+        status_flags, device_id, config_.category_id, gsn, config_number, setup_hash);
+    adv.local_name = config_.device_name;
+    
+    // Per HAP Spec 7.4.6.3: Use 20ms for 3 seconds, then normal interval (1000ms)
+    config_.system->log(platform::System::LogLevel::Info,
+        "[BleTransport] Starting timed advertising for Disconnected Event (20ms for 3s)");
+    config_.ble->start_timed_advertising(adv, 20, 3000, 1000);
+    
+    (void)iid;
 }
 
 std::vector<uint8_t> BleTransport::build_encrypted_advertisement_payload(uint16_t iid, const core::Value& value) {

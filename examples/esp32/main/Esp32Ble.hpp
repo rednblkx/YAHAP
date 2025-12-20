@@ -3,6 +3,7 @@
 #include "hap/platform/Ble.hpp"
 #include <host/ble_hs.h>
 #include <host/util/util.h>
+#include <esp_timer.h>
 #include <vector>
 #include <map>
 
@@ -17,6 +18,10 @@ public:
     void send_notification(uint16_t connection_id, const std::string& characteristic_uuid, std::span<const uint8_t> data) override;
     void disconnect(uint16_t connection_id) override;
     void set_disconnect_callback(DisconnectCallback callback) override;
+    void start_timed_advertising(const Advertisement& data,
+                                  uint32_t fast_interval_ms,
+                                  uint32_t fast_duration_ms,
+                                  uint32_t normal_interval_ms) override;
 
     void init();
     void run();
@@ -46,4 +51,11 @@ private:
     static std::vector<DescriptorContext*> all_descriptor_contexts;
     
     DisconnectCallback disconnect_callback_;
+    
+    // Timed advertising state (for HAP Spec 7.4.6.3 Disconnected Events)
+    esp_timer_handle_t adv_timer_ = nullptr;
+    Advertisement timed_adv_data_;
+    uint32_t normal_interval_ms_ = 1000;
+    static void adv_timer_callback(void* arg);
 };
+

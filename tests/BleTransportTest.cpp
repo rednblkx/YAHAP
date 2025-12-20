@@ -86,6 +86,15 @@ public:
         disconnect_callback_ = callback;
     }
     
+    void start_timed_advertising(const Advertisement& data,
+                                  uint32_t fast_interval_ms,
+                                  uint32_t fast_duration_ms,
+                                  uint32_t normal_interval_ms) override {
+        // In tests, just use the fast interval (no actual timer)
+        (void)fast_duration_ms; (void)normal_interval_ms;
+        start_advertising(data, fast_interval_ms);
+    }
+    
 private:
     DisconnectCallback disconnect_callback_;
 };

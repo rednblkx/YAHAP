@@ -173,6 +173,60 @@ void Esp32Ble::set_disconnect_callback(DisconnectCallback callback) {
     disconnect_callback_ = callback;
 }
 
+void Esp32Ble::adv_timer_callback(void* arg) {
+    auto* self = static_cast<Esp32Ble*>(arg);
+    ESP_LOGI(TAG, "Timed advertising: switching to normal interval (%lu ms)", 
+             (unsigned long)self->normal_interval_ms_);
+    
+    // Restart advertising with normal interval
+    self->start_advertising(self->timed_adv_data_, self->normal_interval_ms_);
+}
+
+void Esp32Ble::start_timed_advertising(const Advertisement& data,
+                                         uint32_t fast_interval_ms,
+                                         uint32_t fast_duration_ms,
+                                         uint32_t normal_interval_ms) {
+    ESP_LOGI(TAG, "Starting timed advertising: fast=%lums for %lums, then normal=%lums",
+             (unsigned long)fast_interval_ms, (unsigned long)fast_duration_ms, 
+             (unsigned long)normal_interval_ms);
+    
+    // Store for callback
+    timed_adv_data_ = data;
+    normal_interval_ms_ = normal_interval_ms;
+    
+    // Cancel existing timer if any
+    if (adv_timer_ != nullptr) {
+        esp_timer_stop(adv_timer_);
+        esp_timer_delete(adv_timer_);
+        adv_timer_ = nullptr;
+    }
+    
+    // Start advertising with fast interval
+    start_advertising(data, fast_interval_ms);
+    
+    // Create and start timer to switch to normal interval
+    esp_timer_create_args_t timer_args = {
+        .callback = adv_timer_callback,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "adv_timer",
+        .skip_unhandled_events = true,
+    };
+    
+    esp_err_t err = esp_timer_create(&timer_args, &adv_timer_);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create advertising timer: %s", esp_err_to_name(err));
+        return;
+    }
+    
+    err = esp_timer_start_once(adv_timer_, fast_duration_ms * 1000); // microseconds
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start advertising timer: %s", esp_err_to_name(err));
+        esp_timer_delete(adv_timer_);
+        adv_timer_ = nullptr;
+    }
+}
+
 void Esp32Ble::send_notification(uint16_t connection_id, const std::string& characteristic_uuid, std::span<const uint8_t> data) {
     uint16_t attr_handle = 0;
     
