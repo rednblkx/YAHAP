@@ -1,12 +1,12 @@
 #pragma once
 
-#include <span>
 #include <string>
 #include <variant>
 #include <vector>
 #include <functional>
 #include <optional>
 #include <cstdint>
+#include <type_traits>
 
 namespace hap::core {
 
@@ -95,15 +95,14 @@ public:
     uint64_t iid() const { return iid_; }
     void set_iid(uint64_t iid) { iid_ = iid; }
 
-    // Value access
     void set_value(Value value, EventSource source = {}) {
-        value_ = std::move(value);
+        value_ = coerce_value(std::move(value));
         if (write_callback_) write_callback_(value_);
         if (event_callback_) event_callback_(value_, source);
     }
 
     Value get_value() const {
-        if (read_cb_) return read_cb_();
+        if (read_cb_) return coerce_value(read_cb_());
         return value_;
     }
 
@@ -156,6 +155,42 @@ private:
     std::optional<std::string> description_;       // Human-readable description
     std::optional<std::vector<double>> valid_values_;  // Valid values (enum)
     std::optional<std::pair<double, double>> valid_values_range_; // Valid values range
+    
+    /**
+     * @brief Coerces a value to the correct variant type based on format_
+     * 
+     * This allows application code to use natural literals (e.g., set_value(0))
+     * without needing explicit casts like static_cast<uint8_t>(0).
+     */
+    Value coerce_value(Value input) const {
+        return std::visit([this, &input](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            
+            // Only coerce arithmetic types - strings and byte vectors pass through
+            if constexpr (std::is_arithmetic_v<T>) {
+                switch (format_) {
+                    case Format::Bool:
+                        return static_cast<bool>(arg);
+                    case Format::UInt8:
+                        return static_cast<uint8_t>(arg);
+                    case Format::UInt16:
+                        return static_cast<uint16_t>(arg);
+                    case Format::UInt32:
+                        return static_cast<uint32_t>(arg);
+                    case Format::UInt64:
+                        return static_cast<uint64_t>(arg);
+                    case Format::Int:
+                        return static_cast<int32_t>(arg);
+                    case Format::Float:
+                        return static_cast<float>(arg);
+                    default:
+                        return input; // String, TLV8, Data - pass through
+                }
+            } else {
+                return input; // Non-arithmetic types pass through unchanged
+            }
+        }, input);
+    }
 };
 
 } // namespace hap::core
