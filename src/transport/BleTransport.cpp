@@ -1456,7 +1456,8 @@ void BleTransport::register_services_by_type(uint16_t filter_type) {
 
             platform::Ble::ServiceDefinition def;
             def.uuid = type_to_uuid_str(svc->type());
-            def.is_primary = svc->is_primary();
+            // HAP Spec 7.4.1: All HAP services must be primary GATT services.
+            def.is_primary = true;
             
             {
                 platform::Ble::CharacteristicDefinition svc_iid_char;
