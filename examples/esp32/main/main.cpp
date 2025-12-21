@@ -1,4 +1,5 @@
 #include <esp_event.h>
+#include <esp_pm.h>
 #include <nvs_flash.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
@@ -18,6 +19,18 @@ static const char* TAG = "HAP_Main";
 extern "C" void app_main() {
     ESP_LOGI(TAG, "Starting HAP ESP32 Example...");
 
+#if CONFIG_PM_ENABLE
+    //Configure dynamic frequency scaling:
+    //automatic light sleep is enabled if tickless idle support is enabled.
+    esp_pm_config_t pm_config = {
+        .max_freq_mhz = 160, //Maximum CPU frequency
+        .min_freq_mhz = 10,  //Minimum CPU frequency
+#if CONFIG_FREERTOS_USE_TICKLESS_IDLE
+        .light_sleep_enable = true
+#endif
+    };
+    ESP_ERROR_CHECK( esp_pm_configure(&pm_config) );
+#endif //CONFIG_PM_ENABLE
     // Default Event Loop
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
