@@ -3,7 +3,8 @@
 #include "hap/platform/Ble.hpp"
 #include "hap/core/AttributeDatabase.hpp"
 #include "hap/transport/PairingEndpoints.hpp"
-#include "hap/transport/ConnectionContext.hpp"
+#include "hap/transport/ble/BleSessionManager.hpp"
+#include "hap/common/TaskScheduler.hpp"
 #include <memory>
 #include <map>
 #include <vector>
@@ -30,6 +31,7 @@ public:
         PairingEndpoints* pairing_endpoints;
         platform::System* system;
         platform::Storage* storage;
+        common::TaskScheduler* scheduler = nullptr;
         
         std::string accessory_id;
         std::string device_name;
@@ -77,11 +79,21 @@ public:
      */
     void notify_value_changed(uint64_t aid, uint64_t iid, const core::Value& value, uint32_t exclude_conn_id = 0);
 
+    /**
+     * @brief Check for session timeouts and disconnect idle connections.
+     * 
+     * Per HAP Spec:
+     * - 30-second idle timeout (7.2.5)
+     * - 10-second HAP procedure timeout (7.3.1)
+     * - 10-second initial procedure timeout (7.5 Req #40)
+     */
+    void check_session_timeouts();
+
 private:
     Config config_;
 
     // UUIDs
-    // HAP Base UUID: 00000000-0000-1000-8000-0026BB765291 (Section 6.6.1)
+    // HAP Base UUID: XXXX-0000-1000-8000-0026BB765291 (Section 6.6.1)
     static constexpr const char* kHapPairingServiceUUID = "00000055-0000-1000-8000-0026BB765291";
     static constexpr const char* kHapProtocolInformationServiceUUID = "000000A2-0000-1000-8000-0026BB765291";
     static constexpr const char* kServiceSignatureCharUUID = "000000A5-0000-1000-8000-0026BB765291";
@@ -89,41 +101,9 @@ private:
     static constexpr const char* kCharacteristicInstanceIdDescUUID = "DC46F0FE-81D2-4616-B5D9-6ABDD796939A";
     static constexpr const char* kHapCharacteristicPropertiesDescUUID = "00000059-0000-1000-8000-0026BB765291";
     
-    // HAP BLE PDUs (Table 7-8)
-    enum class PDUOpcode : uint8_t {
-        CharacteristicSignatureRead = 0x01,
-        CharacteristicWrite = 0x02,
-        CharacteristicRead = 0x03,
-        CharacteristicTimedWrite = 0x04,
-        CharacteristicExecuteWrite = 0x05,
-        ServiceSignatureRead = 0x06,
-        CharacteristicConfiguration = 0x07,
-        ProtocolConfiguration = 0x08
-    };
-    
-    // Internal state for fragmentation/reassembly per connection
-    struct TransactionState {
-        std::vector<uint8_t> buffer;
-        PDUOpcode opcode;
-        uint16_t transaction_id;
-        bool active = false;
-        std::string target_uuid; // UUID of the characteristic being written
-        uint8_t ttl = 0; // Timed Write TTL
-        std::vector<uint8_t> response_buffer; // Buffer for GATT Read response
-        uint64_t last_activity_ms = 0; // Timestamp of last HAP transaction (for idle timeout)
-        uint64_t procedure_start_ms = 0; // Timestamp when procedure started (for 10s timeout)
-        uint64_t connection_established_ms = 0; // Timestamp when connection established (for initial 10s timeout)
-        uint64_t last_write_ms = 0; // Timestamp of last write (for GATT read validation)
-        uint16_t expected_body_length = 0; // Expected body length from PDU header (for fragmentation)
-        bool gsn_incremented = false; // Per spec: GSN increments only once per connection
-        std::vector<uint8_t> timed_write_body; // Body data pending for ExecuteWrite
-        uint16_t timed_write_iid = 0; // IID for pending timed write
-    };
-    std::map<uint16_t, TransactionState> transactions_;
+    std::unique_ptr<ble::BleSessionManager> session_manager_;
 
     uint16_t next_iid_ = 1;
-
-    std::map<uint16_t, std::unique_ptr<ConnectionContext>> connections_;
 
     // Mapping (AID, IID) -> Characteristic UUID
     std::map<std::pair<uint64_t, uint64_t>, std::string> instance_map_;
@@ -137,8 +117,6 @@ private:
         std::string user_description; // Optional GATT User Description
     };
     std::map<uint16_t, CharacteristicMetadata> pairing_char_metadata_;
-    
-    std::map<std::string, std::vector<uint16_t>> subscriptions_;
 
     struct BroadcastConfig {
         uint16_t iid = 0;
@@ -159,13 +137,12 @@ private:
     void setup_protocol_info_service();
     void increment_gsn();
     uint16_t get_current_gsn();
-    void check_session_timeouts();
     
     void handle_hap_write(uint16_t connection_id, const std::string& uuid, std::span<const uint8_t> data);
     void handle_hap_write_with_id(uint16_t connection_id, std::string uuid, std::span<const uint8_t> data);
     std::vector<uint8_t> handle_hap_read(uint16_t connection_id);
     
-    void process_transaction(uint16_t connection_id, TransactionState& state);
+    void process_transaction(uint16_t connection_id, ble::TransactionState& state);
     std::vector<uint8_t> process_signature_read(uint16_t connection_id, uint16_t iid);
     std::vector<uint8_t> process_characteristic_read(uint16_t connection_id, std::span<const uint8_t> body);
     bool process_characteristic_write(uint16_t connection_id, uint16_t tid, const std::string& uuid, std::span<const uint8_t> body);
@@ -209,7 +186,6 @@ private:
      */
     bool is_broadcast_key_valid();
     
-    static std::vector<uint8_t> serialize_value(const core::Value& value, core::Format format);
     void register_accessory_info_service();
     void register_user_services();
     void register_services_by_type(uint16_t filter_type);

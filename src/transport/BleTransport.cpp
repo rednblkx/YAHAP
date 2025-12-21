@@ -1,9 +1,12 @@
 #include "hap/transport/BleTransport.hpp"
+#include "hap/core/CharacteristicFinder.hpp"
 #include "hap/core/HAPStatus.hpp"
 #include <random>
 #include <algorithm>
 #include <cstring>
 #include "hap/core/TLV8.hpp"
+#include "hap/transport/ble/BleTlvBuilder.hpp"
+#include "hap/core/CharacteristicSerializer.hpp"
 
 static std::string to_hex_string(const uint8_t* data, size_t len) {
     std::string s;
@@ -17,61 +20,14 @@ static std::string to_hex_string(const uint8_t* data, size_t len) {
 
 namespace hap::transport {
 
-enum class HAPBLEPDUTLVType : uint8_t {
-    CharacteristicType = 0x04,
-    CharacteristicInstanceID = 0x05,
-    ServiceType = 0x06,
-    ServiceInstanceID = 0x07,
-    TTL = 0x08,
-    ReturnResponse = 0x09,
-    CharacteristicProperties = 0x0A,
-    GATTUserDescription = 0x0B,
-    GATTPresentationFormat = 0x0C,
-    GATTValidRange = 0x0D,
-    StepValue = 0x0E,
-    ServiceProperties = 0x0F,
-    LinkedServices = 0x10,
-    ValidValues = 0x11,
-    ValidValuesRange = 0x12
-};
+// Import types from the extracted ble:: namespace components
+using ble::PDUOpcode;
+using ble::TransactionState;
+using ble::HAPBLEPDUTLVType;
+using ble::BleTlvBuilder;
 
-[[maybe_unused]] static std::vector<uint8_t> uuid_to_bytes(uint64_t type) {
-    std::vector<uint8_t> bytes;
-    if (type <= 0xFFFF) {
-        bytes.push_back(type & 0xFF);
-        bytes.push_back((type >> 8) & 0xFF);
-    }
-    return bytes;
-}
-
-// HAP Base UUID: 0000XXXX-0000-1000-8000-0026BB765291
-static void append_hap_uuid128(std::vector<uint8_t>& buf, uint16_t short_uuid) {
-    // BLE/HAP requires 128-bit UUIDs in little-endian (reversed from UUID string)
-    // Little-endian order: node | clock_seq | time_hi | time_mid | time_low
-    // Node: 0026BB765291 -> little-endian: 91 52 76 BB 26 00
-    buf.push_back(0x91);
-    buf.push_back(0x52);
-    buf.push_back(0x76);
-    buf.push_back(0xBB);
-    buf.push_back(0x26);
-    buf.push_back(0x00);
-    // clock_seq: 8000 -> little-endian: 00 80
-    buf.push_back(0x00);
-    buf.push_back(0x80);
-    // time_hi_and_version: 1000 -> little-endian: 00 10
-    buf.push_back(0x00);
-    buf.push_back(0x10);
-    // time_mid: 0000 -> little-endian: 00 00
-    buf.push_back(0x00);
-    buf.push_back(0x00);
-    // time_low: 0000XXXX with short_uuid -> little-endian: XX XX 00 00
-    buf.push_back(short_uuid & 0xFF);
-    buf.push_back((short_uuid >> 8) & 0xFF);
-    buf.push_back(0x00);
-    buf.push_back(0x00);
-}
-
-BleTransport::BleTransport(Config config) : config_(std::move(config)) {
+BleTransport::BleTransport(Config config) : config_(std::move(config)),
+    session_manager_(std::make_unique<ble::BleSessionManager>(config_.system)) {
     if (!config_.ble) {
         if(config_.system) config_.system->log(platform::System::LogLevel::Warning, "[BleTransport] No BLE platform interface provided");
     }
@@ -90,16 +46,7 @@ void BleTransport::start() {
         config_.system->log(platform::System::LogLevel::Info, 
             "[BleTransport] Device disconnected, connection_id=" + std::to_string(connection_id));
         
-        transactions_.erase(connection_id);
-        
-        connections_.erase(connection_id);
-        
-        for (auto& [uuid, subscribers] : subscriptions_) {
-            subscribers.erase(
-                std::remove(subscribers.begin(), subscribers.end(), connection_id),
-                subscribers.end()
-            );
-        }
+        session_manager_->remove(connection_id);
         
         config_.system->log(platform::System::LogLevel::Info, 
             "[BleTransport] Connection state cleaned up, refreshing advertising");
@@ -488,50 +435,10 @@ void BleTransport::increment_gsn() {
 }
 
 void BleTransport::check_session_timeouts() {
-    // Per Spec 7.2.5: 30-second idle timeout
-    // Per Spec 7.3.1: 10-second HAP procedure timeout
-    // Per Spec 7.5 Req #40: 10-second initial procedure timeout
+    auto timed_out = session_manager_->check_timeouts();
     
-    uint64_t current_time = config_.system->millis();
-    std::vector<uint16_t> connections_to_terminate;
-    
-    for (auto& [conn_id, state] : transactions_) {
-        // Check 10-second initial procedure timeout (Req #40)
-        // After BLE link established, first HAP procedure must begin within 10s
-        if (state.connection_established_ms > 0 && !state.active && state.last_activity_ms == 0) {
-            uint64_t time_since_connect = current_time - state.connection_established_ms;
-            if (time_since_connect > 10000) { // 10 seconds
-                config_.system->log(platform::System::LogLevel::Warning,
-                    "[BleTransport] Initial procedure timeout for connection " + std::to_string(conn_id) + 
-                    " - no HAP procedure started within 10s");
-                connections_to_terminate.push_back(conn_id);
-                continue;
-            }
-        }
-        
-        if (state.active && state.procedure_start_ms > 0) {
-            uint64_t procedure_duration = current_time - state.procedure_start_ms;
-            if (procedure_duration > 10000) { // 10 seconds
-                config_.system->log(platform::System::LogLevel::Warning,
-                    "[BleTransport] Procedure timeout for connection " + std::to_string(conn_id));
-                connections_to_terminate.push_back(conn_id);
-                continue;
-            }
-        }
-        
-        if (state.last_activity_ms > 0) {
-            uint64_t idle_duration = current_time - state.last_activity_ms;
-            if (idle_duration > 30000) { // 30 seconds
-                config_.system->log(platform::System::LogLevel::Info,
-                    "[BleTransport] Idle timeout for connection " + std::to_string(conn_id));
-                connections_to_terminate.push_back(conn_id);
-            }
-        }
-    }
-    
-    for (uint16_t conn_id : connections_to_terminate) {
-        transactions_.erase(conn_id);
-        connections_.erase(conn_id);
+    for (uint16_t conn_id : timed_out) {
+        session_manager_->remove(conn_id);
         config_.ble->disconnect(conn_id);
         config_.system->log(platform::System::LogLevel::Info,
             "[BleTransport] Terminated connection " + std::to_string(conn_id) + " due to timeout");
@@ -549,9 +456,9 @@ void BleTransport::handle_hap_write(uint16_t connection_id, const std::string& u
     config_.system->log(platform::System::LogLevel::Debug, "[BleTransport] Write PDU Fragment (" + std::to_string(data.size()) + " bytes): " + to_hex_string(data.data(), data.size()));
 
     bool session_is_secured = false;
-    if (connections_.contains(connection_id)) {
-        auto& ctx = *connections_[connection_id];
-        session_is_secured = ctx.is_encrypted();
+    auto* session = session_manager_->get_session(connection_id);
+    if (session && session->context) {
+        session_is_secured = session->context->is_encrypted();
     }
     
     bool requires_encryption = true;
@@ -571,15 +478,21 @@ void BleTransport::handle_hap_write(uint16_t connection_id, const std::string& u
     std::span<const uint8_t> working_data = data;
     
     if (session_is_secured && requires_encryption) {
-        auto& ctx = *connections_[connection_id];
-        auto decrypted = ctx.get_secure_session()->decrypt_ble_pdu(data);
+        auto& session_ref = session_manager_->get_or_create(connection_id);
+        if (!session_ref.context) {
+            config_.system->log(platform::System::LogLevel::Error,
+                "[BleTransport] Context missing for secured session - disconnecting");
+            config_.ble->disconnect(connection_id);
+            session_manager_->remove(connection_id);
+            return;
+        }
+        auto decrypted = session_ref.context->get_secure_session()->decrypt_ble_pdu(data);
         if (!decrypted) {
             config_.system->log(platform::System::LogLevel::Error, 
                 "[BleTransport] Decryption failed for connection " + std::to_string(connection_id) + " - disconnecting");
             // Per HAP Spec 6.5.2.2: Close connection on decryption failure
             config_.ble->disconnect(connection_id);
-            connections_.erase(connection_id);
-            transactions_.erase(connection_id);
+            session_manager_->remove(connection_id);
             return;
         }
         decrypted_data = std::move(*decrypted);
@@ -605,7 +518,7 @@ void BleTransport::handle_hap_write(uint16_t connection_id, const std::string& u
         
         config_.system->log(platform::System::LogLevel::Info, "[BleTransport] New Transaction TID=" + std::to_string(tid) + " Opcode=" + std::to_string((int)opcode));
         
-        auto& state = transactions_[connection_id];
+        auto& state = session_manager_->get_or_create(connection_id).transaction;
         state.opcode = opcode;
         state.transaction_id = tid;
         state.target_uuid = uuid;
@@ -623,7 +536,7 @@ void BleTransport::handle_hap_write(uint16_t connection_id, const std::string& u
         state.buffer.insert(state.buffer.end(), working_data.begin(), working_data.end());
         process_transaction(connection_id, state);
     } else {
-        auto& state = transactions_[connection_id];
+        auto& state = session_manager_->get_or_create(connection_id).transaction;
         if (!state.active) {
              config_.system->log(platform::System::LogLevel::Warning, "[BleTransport] Orphaned continuation fragment!");
              return;
@@ -645,8 +558,9 @@ void BleTransport::handle_hap_write(uint16_t connection_id, const std::string& u
 }
 
 std::vector<uint8_t> BleTransport::handle_hap_read(uint16_t connection_id) {
-    if (transactions_.contains(connection_id)) {
-        auto& state = transactions_[connection_id];
+    auto* session = session_manager_->get_session(connection_id);
+    if (session) {
+        auto& state = session->transaction;
         
         if (state.last_write_ms > 0) {
             uint64_t current_time = config_.system->millis();
@@ -675,10 +589,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
     
     // For Write operations (opcode 0x02, 0x04), the header is 7 bytes:
     // CF(1) | Opcode(1) | TID(1) | IID(2) | BodyLen(2) | Body...
-    if (opcode == PDUOpcode::CharacteristicWrite || 
-        opcode == PDUOpcode::CharacteristicTimedWrite ||
-        opcode == PDUOpcode::CharacteristicConfiguration ||
-        opcode == PDUOpcode::ProtocolConfiguration) {
+    if (ble::HapPdu::opcode_has_body(opcode)) {
         
         if (state.buffer.size() < 7) return;
         
@@ -706,27 +617,17 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
 
     config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Processing Opcode " + std::to_string((int)opcode) + " TID=" + std::to_string(tid));
     
+    std::unique_ptr<core::CharacteristicFinder> finder;
+    if (config_.database) {
+        finder = std::make_unique<core::CharacteristicFinder>(*config_.database);
+    }
+    
     auto find_service = [&](uint16_t target_iid) -> std::shared_ptr<core::Service> {
-        if (!config_.database) return nullptr;
-        for (const auto& acc : config_.database->accessories()) {
-            for (const auto& svc : acc->services()) {
-                if (svc->iid() == target_iid) return svc;
-            }
-        }
-        return nullptr;
+        return finder ? finder->service_by_iid(target_iid) : nullptr;
     };
-    (void)find_service;
-
+    
     auto find_char_in_db = [&](uint16_t target_iid) -> std::shared_ptr<core::Characteristic> {
-        if (!config_.database) return nullptr;
-        for (const auto& acc : config_.database->accessories()) {
-            for (const auto& svc : acc->services()) {
-                for (const auto& ch : svc->characteristics()) {
-                    if (ch->iid() == target_iid) return ch;
-                }
-            }
-        }
-        return nullptr;
+        return finder ? finder->by_iid(target_iid) : nullptr;
     };
 
     if (opcode == PDUOpcode::ServiceSignatureRead) {
@@ -762,43 +663,26 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
             config_.system->log(platform::System::LogLevel::Warning, 
                 "[BleTransport] Service Signature Read IID=" + std::to_string(iid) + " Not Found - returning empty");
             // Return empty response with props=0
-            sig_response.push_back((uint8_t)HAPBLEPDUTLVType::ServiceProperties);
-            sig_response.push_back(0x02);
-            sig_response.push_back(0x00); // props = 0
+            BleTlvBuilder builder;
+            builder.add_uint16(HAPBLEPDUTLVType::ServiceProperties, 0);
+            auto tlv = builder.build();
+            sig_response.insert(sig_response.end(), tlv.begin(), tlv.end());
+            
+            sig_response.push_back(static_cast<uint8_t>(HAPBLEPDUTLVType::LinkedServices));
             sig_response.push_back(0x00);
-            
-            // Linked services with length 0
-            sig_response.push_back((uint8_t)HAPBLEPDUTLVType::LinkedServices);
-            sig_response.push_back(0x00); // length = 0
         } else {
-            // Service Properties (TLV Type 0x0F - HAPBLEPDUTLVType::ServiceProperties)
-            // Bit 0: Primary Service
-            // Bit 1: Hidden Service
-            // Bit 2: Supports HAP Protocol Configuration (only for Protocol Info Service 0xA2)
-            uint16_t props = 0;
+            uint16_t props = is_primary ? 0x0001 : 0x0000;
             
-            if (is_primary) {
-                props |= 0x0001;  // Bit 0: Primary Service
-            }
+            BleTlvBuilder builder;
+            builder.add_uint16(HAPBLEPDUTLVType::ServiceProperties, props);
+            auto tlv = builder.build();
+            sig_response.insert(sig_response.end(), tlv.begin(), tlv.end());
             
-            // TLV: Type=0x0F, Len=2, Value=Integer
-            sig_response.push_back((uint8_t)HAPBLEPDUTLVType::ServiceProperties);
-            sig_response.push_back(0x02);
-            sig_response.push_back(props & 0xFF);
-            sig_response.push_back((props >> 8) & 0xFF);
-            
-            // Linked Services (TLV Type 0x10)
-            // Format: Array of 16-bit service IIDs (little-endian)
-            if (!linked_services.empty()) {
-                sig_response.push_back((uint8_t)HAPBLEPDUTLVType::LinkedServices);
-                sig_response.push_back(static_cast<uint8_t>(linked_services.size() * 2));
-                for (uint16_t linked_iid : linked_services) {
-                    sig_response.push_back(linked_iid & 0xFF);
-                    sig_response.push_back((linked_iid >> 8) & 0xFF);
-                }
-            } else {
-                sig_response.push_back((uint8_t)HAPBLEPDUTLVType::LinkedServices);
-                sig_response.push_back(0x00);
+            sig_response.push_back(static_cast<uint8_t>(HAPBLEPDUTLVType::LinkedServices));
+            sig_response.push_back(static_cast<uint8_t>(linked_services.size() * 2));
+            for (uint16_t linked_iid : linked_services) {
+                sig_response.push_back(linked_iid & 0xFF);
+                sig_response.push_back((linked_iid >> 8) & 0xFF);
             }
             
             config_.system->log(platform::System::LogLevel::Info, 
@@ -833,13 +717,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
     // Body starts at offset 7
     // For Read (0x03), header is only 5 bytes with no body
     
-    size_t body_offset = 5;
-    if (opcode == PDUOpcode::CharacteristicWrite || 
-        opcode == PDUOpcode::CharacteristicTimedWrite ||
-        opcode == PDUOpcode::CharacteristicConfiguration ||
-        opcode == PDUOpcode::ProtocolConfiguration) {
-        body_offset = 7;
-    }
+    size_t body_offset = ble::HapPdu::body_offset(opcode);
     
     std::span<const uint8_t> body;
     if (state.buffer.size() > body_offset) {
@@ -872,11 +750,10 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         else {
             auto ch = find_char_in_db(iid);
             if (ch) {
-                auto raw_value = serialize_value(ch->get_value(), ch->format());
-                // Wrap in TLV: Type=0x01, Length, Value
+                auto raw_value = core::CharacteristicSerializer::to_bytes(ch->get_value());
                 value_bytes.push_back(0x01); // Type: HAP-Param-Value
-                value_bytes.push_back(static_cast<uint8_t>(raw_value.size())); // Length
-                value_bytes.insert(value_bytes.end(), raw_value.begin(), raw_value.end()); // Value
+                value_bytes.push_back(static_cast<uint8_t>(raw_value.size()));
+                value_bytes.insert(value_bytes.end(), raw_value.begin(), raw_value.end());
             } else {
                 status = 0x05; // Invalid Request (Attribute Not Found)
                 config_.system->log(platform::System::LogLevel::Warning, "[BleTransport] Read IID=" + std::to_string(iid) + " Not Found");
@@ -893,10 +770,11 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         if (meta_it != pairing_char_metadata_.end()) {
              uint8_t type = meta_it->second.char_type;
              
-             if (!connections_.contains(connection_id)) {
-                connections_[connection_id] = std::make_unique<ConnectionContext>(config_.crypto, config_.system, connection_id);
+             auto& session = session_manager_->get_or_create(connection_id);
+             if (!session.context) {
+                session.context = std::make_unique<ConnectionContext>(config_.crypto, config_.system, connection_id);
              }
-             auto& ctx = *connections_[connection_id];
+             auto& ctx = *session.context;
              
              // HAP-BLE Pair Setup/Verify are "Write-with-Response" (Spec 7.3.5.5)
              // The body is a LIST of TLVs:
@@ -1008,8 +886,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                             break;
                      }
                      
-                     // Set the value (this also invokes the write callback)
-                     ch->set_value(new_value);
+                     ch->set_value(new_value, core::EventSource::from_connection(connection_id));
                      config_.system->log(platform::System::LogLevel::Info, 
                          "[BleTransport] Write IID=" + std::to_string(iid) + " success");
                      
@@ -1019,8 +896,6 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                          increment_gsn();
                      }
                      
-                     // Trigger BLE events (Connected/Broadcasted/Disconnected per Spec 7.4.6)
-                     // Exclude the connection that made the write (per spec: don't notify originator)
                      handle_characteristic_change(1, iid, new_value, connection_id);
                  } else {
                      config_.system->log(platform::System::LogLevel::Warning, 
@@ -1061,10 +936,11 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
             if (meta_it != pairing_char_metadata_.end()) {
                 uint8_t type = meta_it->second.char_type;
                 
-                if (!connections_.contains(connection_id)) {
-                    connections_[connection_id] = std::make_unique<ConnectionContext>(config_.crypto, config_.system, connection_id);
+                auto& session = session_manager_->get_or_create(connection_id);
+                if (!session.context) {
+                    session.context = std::make_unique<ConnectionContext>(config_.crypto, config_.system, connection_id);
                 }
-                auto& ctx = *connections_[connection_id];
+                auto& ctx = *session.context;
                 
                 std::vector<uint8_t> inner_body;
                 bool return_response_requested = false;
@@ -1265,14 +1141,14 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
             config_.system->log(platform::System::LogLevel::Info,
                 "[BleTransport] Protocol Config: Generate Broadcast Encryption Key requested");
             
-            if (!connections_.contains(connection_id) || !connections_[connection_id]->is_encrypted()) {
+            auto* session = session_manager_->get_session(connection_id);
+            if (!session || !session->context || !session->context->is_encrypted()) {
                 config_.system->log(platform::System::LogLevel::Error,
                     "[BleTransport] Protocol Config: Cannot generate key - no secure session");
                 status = 0x06; // Invalid Request
             } else {
-                auto& ctx = *connections_[connection_id];
+                auto& ctx = *session->context;
                 
-                // Get controller LTPK from storage
                 std::string pairing_key = "pairing_" + ctx.controller_id();
                 auto controller_ltpk = config_.storage->get(pairing_key);
                 
@@ -1348,33 +1224,12 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
 }
 
 void BleTransport::send_response(uint16_t conn_id, uint16_t tid, const std::string& uuid, uint8_t status, std::span<const uint8_t> body) {
-    static constexpr size_t kMaxPayload = 20; 
-    
-    std::vector<uint8_t> packet;
-    packet.reserve(kMaxPayload);
-    
-    // Header
-    // Control Field: Response type (bits 1-3 = 001) = 0x02
-    // Per Spec Table 7-5: Bit 3=0, Bit 2=0, Bit 1=1 -> Response
-    // Bit 7=0 (first fragment), Bit 4=0 (16-bit IIDs), Bit 0=0 (1 byte CF)
-    packet.push_back(0x02); // CF: Response type
-    
-    // TID: Transaction Identifier (1 byte)
-    packet.push_back(tid & 0xFF);
-    
-    // Status: HAP status code (1 byte)
-    packet.push_back(status);
-    
-    // Body Length (2 bytes, little-endian)
-    uint16_t total_len = body.size();
-    packet.push_back(total_len & 0xFF);
-    packet.push_back((total_len >> 8) & 0xFF);
-    
-    packet.insert(packet.end(), body.begin(), body.end());
+    std::vector<uint8_t> packet = ble::HapPdu::build_response(tid, status, body);
     
     bool session_is_secured = false;
-    if (connections_.contains(conn_id)) {
-        session_is_secured = connections_[conn_id]->is_encrypted();
+    auto* session_ptr = session_manager_->get_session(conn_id);
+    if (session_ptr && session_ptr->context) {
+        session_is_secured = session_ptr->context->is_encrypted();
     }
     
     bool requires_encryption = true;
@@ -1389,64 +1244,62 @@ void BleTransport::send_response(uint16_t conn_id, uint16_t tid, const std::stri
     }
     
     if (session_is_secured && requires_encryption) {
-        auto& ctx = *connections_[conn_id];
+        auto& ctx = *session_ptr->context;
         auto encrypted = ctx.get_secure_session()->encrypt_ble_pdu(packet);
         if (encrypted.empty()) {
             config_.system->log(platform::System::LogLevel::Error, 
                 "[BleTransport] Response encryption failed for connection " + std::to_string(conn_id));
-            transactions_[conn_id].response_buffer = packet;
+            session_manager_->get_or_create(conn_id).transaction.response_buffer = packet;
         } else {
             config_.system->log(platform::System::LogLevel::Debug, 
                 "[BleTransport] Encrypted response (" + std::to_string(encrypted.size()) + " bytes)");
-            transactions_[conn_id].response_buffer = std::move(encrypted);
+            session_manager_->get_or_create(conn_id).transaction.response_buffer = std::move(encrypted);
         }
     } else {
-        transactions_[conn_id].response_buffer = packet;
+        session_manager_->get_or_create(conn_id).transaction.response_buffer = packet;
     }
     
     // HAP-BLE Spec 7.3.5.1/7.3.5.5: The response is returned in the GATT Read Response.
 }
 
 bool BleTransport::process_characteristic_write(uint16_t connection_id, uint16_t tid, const std::string& uuid, std::span<const uint8_t> body) {
+    auto& session = session_manager_->get_or_create(connection_id);
+    if (!session.context) {
+        session.context = std::make_unique<ConnectionContext>(config_.crypto, config_.system, connection_id);
+    }
+    
     if (uuid == "0000004C-0000-1000-8000-0026BB765291") { // Pair Setup
-        if (!connections_.contains(connection_id)) {
-            connections_[connection_id] = std::make_unique<ConnectionContext>(config_.crypto, config_.system, connection_id);
-        }
-        
         Request req;
         req.body.assign(body.begin(), body.end());
         req.method = Method::POST; 
         req.path = "/pair-setup";
         
-        auto resp = config_.pairing_endpoints->handle_pair_setup(req, *connections_[connection_id]);
+        auto resp = config_.pairing_endpoints->handle_pair_setup(req, *session.context);
         
         uint8_t status = (resp.status == Status::OK) ? 0x00 : 0x05; 
         send_response(connection_id, tid, uuid, status, resp.body);
         return true; 
     }
     else if (uuid == "0000004E-0000-1000-8000-0026BB765291") { // Pair Verify
-         if (!connections_.contains(connection_id)) {
-             connections_[connection_id] = std::make_unique<ConnectionContext>(config_.crypto, config_.system, connection_id);
-        }
         Request req;
         req.body.assign(body.begin(), body.end());
         req.method = Method::POST;
         req.path = "/pair-verify";
         
-        auto resp = config_.pairing_endpoints->handle_pair_verify(req, *connections_[connection_id]);
+        auto resp = config_.pairing_endpoints->handle_pair_verify(req, *session.context);
         uint8_t status = (resp.status == Status::OK) ? 0x00 : 0x05;
         send_response(connection_id, tid, uuid, status, resp.body);
         return true;
     }
     else if (uuid == "00000050-0000-1000-8000-0026BB765291") { // Pairing Mappings
-         if (!connections_.contains(connection_id)) return false;
+        if (!session.context) return false;
         
         Request req;
         req.body.assign(body.begin(), body.end());
         req.method = Method::POST;
         req.path = "/pairings";
         
-        auto resp = config_.pairing_endpoints->handle_pairings(req, *connections_[connection_id]);
+        auto resp = config_.pairing_endpoints->handle_pairings(req, *session.context);
         uint8_t status = (resp.status == Status::OK) ? 0x00 : 0x05;
         send_response(connection_id, tid, uuid, status, resp.body);
         return true;
@@ -1454,27 +1307,6 @@ bool BleTransport::process_characteristic_write(uint16_t connection_id, uint16_t
     
     return false;
 }
-
-static void append_tlv(std::vector<uint8_t>& buf, uint8_t type, std::span<const uint8_t> value) {
-    buf.push_back(type);
-    buf.push_back(static_cast<uint8_t>(value.size())); // Length < 255 assumed
-    buf.insert(buf.end(), value.begin(), value.end());
-}
-
-static void append_tlv_gatt_format(std::vector<uint8_t>& buf, uint8_t bt_sig_format, uint16_t bt_sig_unit = 0x2700) {
-    uint8_t format_bytes[7] = {
-        bt_sig_format,                               // Format
-        0x00,                                         // Exponent
-        static_cast<uint8_t>(bt_sig_unit & 0xFF),    // Unit (LE)
-        static_cast<uint8_t>((bt_sig_unit >> 8) & 0xFF),
-        0x01,                                         // Namespace (Bluetooth SIG)
-        0x00, 0x00                                    // Description (LE)
-    };
-    append_tlv(buf, 0x0C, std::span<const uint8_t>(format_bytes, 7));
-}
-
-
-
 std::vector<uint8_t> BleTransport::process_signature_read(uint16_t connection_id, uint16_t char_iid) {
     (void)connection_id;
     std::vector<uint8_t> response;
@@ -1482,68 +1314,32 @@ std::vector<uint8_t> BleTransport::process_signature_read(uint16_t connection_id
     if (pairing_char_metadata_.count(char_iid)) {
         const auto& meta = pairing_char_metadata_[char_iid];
         
-        auto append_uuid128 = [&](uint16_t short_uuid) {
-            // HAP Base UUID: 0000XXXX-0000-1000-8000-0026BB765291
-            // BLE/HAP requires 128-bit UUIDs in little-endian (reversed from UUID string)
-            // 
-            // UUID string format:  time_low - time_mid - time_hi - clock_seq - node
-            // HAP Base:            0000XXXX - 0000     - 1000    - 8000      - 0026BB765291
-            //
-            // Little-endian order (reversed): node | clock_seq | time_hi | time_mid | time_low
-            // Bytes 0-5:   node (reversed):    91 52 76 BB 26 00
-            // Bytes 6-7:   clock_seq (reversed): 00 80
-            // Bytes 8-9:   time_hi_and_version (reversed): 00 10
-            // Bytes 10-11: time_mid (reversed): 00 00  
-            // Bytes 12-15: time_low with short UUID (reversed): XX XX 00 00
-            
-            // Node: 0026BB765291 -> little-endian: 91 52 76 BB 26 00
-            response.push_back(0x91);
-            response.push_back(0x52);
-            response.push_back(0x76);
-            response.push_back(0xBB);
-            response.push_back(0x26);
-            response.push_back(0x00);
-            // clock_seq: 8000 -> little-endian: 00 80
-            response.push_back(0x00);
-            response.push_back(0x80);
-            // time_hi_and_version: 1000 -> little-endian: 00 10
-            response.push_back(0x00);
-            response.push_back(0x10);
-            // time_mid: 0000 -> little-endian: 00 00
-            response.push_back(0x00);
-            response.push_back(0x00);
-            // time_low: 0000XXXX with short_uuid -> little-endian: XX XX 00 00
-            response.push_back(short_uuid & 0xFF);
-            response.push_back((short_uuid >> 8) & 0xFF);
-            response.push_back(0x00);
-            response.push_back(0x00);
-        };
-
-
         {
-            response.push_back((uint8_t)HAPBLEPDUTLVType::CharacteristicType);
-            response.push_back(16); 
-            append_uuid128(meta.char_type);
+            BleTlvBuilder builder;
+            builder.add_hap_uuid128(HAPBLEPDUTLVType::CharacteristicType, meta.char_type);
+            auto tlv = builder.build();
+            response.insert(response.end(), tlv.begin(), tlv.end());
         }
         
         {
-            response.push_back((uint8_t)HAPBLEPDUTLVType::ServiceInstanceID);
-            response.push_back(2);
-            response.push_back(meta.service_id & 0xFF);
-            response.push_back((meta.service_id >> 8) & 0xFF);
+            BleTlvBuilder builder;
+            builder.add_uint16(HAPBLEPDUTLVType::ServiceInstanceID, meta.service_id);
+            auto tlv = builder.build();
+            response.insert(response.end(), tlv.begin(), tlv.end());
         }
         
         {
-            response.push_back((uint8_t)HAPBLEPDUTLVType::ServiceType);
-            response.push_back(16);
-            append_uuid128(meta.service_type);
+            BleTlvBuilder builder;
+            builder.add_hap_uuid128(HAPBLEPDUTLVType::ServiceType, meta.service_type);
+            auto tlv = builder.build();
+            response.insert(response.end(), tlv.begin(), tlv.end());
         }
         
         {
-            response.push_back((uint8_t)HAPBLEPDUTLVType::CharacteristicProperties);
-            response.push_back(2);
-            response.push_back(meta.properties & 0xFF);
-            response.push_back((meta.properties >> 8) & 0xFF);
+            BleTlvBuilder builder;
+            builder.add_uint16(HAPBLEPDUTLVType::CharacteristicProperties, meta.properties);
+            auto tlv = builder.build();
+            response.insert(response.end(), tlv.begin(), tlv.end());
         }
         
         if (!meta.user_description.empty()) {
@@ -1554,7 +1350,10 @@ std::vector<uint8_t> BleTransport::process_signature_read(uint16_t connection_id
         
         {
              uint8_t gatt_format = (meta.char_type == 0x4F) ? 0x04 : 0x1B;
-             append_tlv_gatt_format(response, gatt_format);
+             BleTlvBuilder builder;
+             builder.add_gatt_format(gatt_format);
+             auto tlv = builder.build();
+             response.insert(response.end(), tlv.begin(), tlv.end());
         }
 
         config_.system->log(platform::System::LogLevel::Info, 
@@ -1570,23 +1369,25 @@ std::vector<uint8_t> BleTransport::process_signature_read(uint16_t connection_id
                      if (ch->iid() == char_iid) {
                             {
                              uint16_t short_uuid = ch->type() & 0xFFFF;
-                             response.push_back((uint8_t)HAPBLEPDUTLVType::CharacteristicType);
-                             response.push_back(16);  // 128-bit UUID = 16 bytes
-                             append_hap_uuid128(response, short_uuid);
+                             BleTlvBuilder builder;
+                             builder.add_hap_uuid128(HAPBLEPDUTLVType::CharacteristicType, short_uuid);
+                             auto tlv = builder.build();
+                             response.insert(response.end(), tlv.begin(), tlv.end());
                          }
 
                          {
-                             response.push_back((uint8_t)HAPBLEPDUTLVType::ServiceInstanceID);
-                             response.push_back(2);
-                             response.push_back(svc->iid() & 0xFF);
-                             response.push_back((svc->iid() >> 8) & 0xFF);
+                             BleTlvBuilder builder;
+                             builder.add_uint16(HAPBLEPDUTLVType::ServiceInstanceID, svc->iid());
+                             auto tlv = builder.build();
+                             response.insert(response.end(), tlv.begin(), tlv.end());
                          }
                          
                          {
                              uint16_t svc_short_uuid = svc->type() & 0xFFFF;
-                             response.push_back((uint8_t)HAPBLEPDUTLVType::ServiceType);
-                             response.push_back(16);  // 128-bit UUID = 16 bytes
-                             append_hap_uuid128(response, svc_short_uuid);
+                             BleTlvBuilder builder;
+                             builder.add_hap_uuid128(HAPBLEPDUTLVType::ServiceType, svc_short_uuid);
+                             auto tlv = builder.build();
+                             response.insert(response.end(), tlv.begin(), tlv.end());
                          }
                          
                          {
@@ -1601,24 +1402,18 @@ std::vector<uint8_t> BleTransport::process_signature_read(uint16_t connection_id
                                  else if (p == core::Permission::AdditionalAuthorization) props |= 0x0004;
                              }
                              
-                             response.push_back((uint8_t)HAPBLEPDUTLVType::CharacteristicProperties);
-                             response.push_back(2);
-                             response.push_back(props & 0xFF);
-                             response.push_back((props >> 8) & 0xFF);
+                             BleTlvBuilder builder;
+                             builder.add_uint16(HAPBLEPDUTLVType::CharacteristicProperties, props);
+                             auto tlv = builder.build();
+                             response.insert(response.end(), tlv.begin(), tlv.end());
                          }
 
                          {
-                             uint8_t gatt_format = 0x1B;
-                             auto fmt = ch->format();
-                             if (fmt == core::Format::Bool) gatt_format = 0x01;
-                             else if (fmt == core::Format::UInt8) gatt_format = 0x04;
-                             else if (fmt == core::Format::UInt16) gatt_format = 0x06;
-                             else if (fmt == core::Format::UInt32) gatt_format = 0x08;
-                             else if (fmt == core::Format::Int) gatt_format = 0x10;
-                             else if (fmt == core::Format::Float) gatt_format = 0x14;
-                             else if (fmt == core::Format::String) gatt_format = 0x19;
-                             
-                             append_tlv_gatt_format(response, gatt_format);
+                             uint8_t gatt_format = core::CharacteristicSerializer::gatt_format_byte(ch->format());
+                             BleTlvBuilder builder;
+                             builder.add_gatt_format(gatt_format);
+                             auto tlv = builder.build();
+                             response.insert(response.end(), tlv.begin(), tlv.end());
                          }
                          
                          return response;
@@ -1733,10 +1528,9 @@ void BleTransport::register_services_by_type(uint16_t filter_type) {
                 
                 cdef.on_subscribe = [this, uuid=char_uuid](uint16_t conn_id, bool enabled) {
                      if (enabled) {
-                         subscriptions_[uuid].push_back(conn_id);
+                         session_manager_->add_subscription(uuid, conn_id);
                      } else {
-                         auto& subs = subscriptions_[uuid];
-                         std::erase(subs, conn_id);
+                         session_manager_->remove_subscription(uuid, conn_id);
                      }
                 };
 
@@ -1745,53 +1539,6 @@ void BleTransport::register_services_by_type(uint16_t filter_type) {
             config_.ble->register_service(def);
         }
     }
-}
-
-std::vector<uint8_t> BleTransport::serialize_value(const core::Value& value, core::Format format) {
-    (void)format;
-    std::vector<uint8_t> data;
-    
-    std::visit([&](auto&& arg) {
-        using T = std::decay_t<decltype(arg)>;
-        if constexpr (std::is_same_v<T, bool>) {
-             data.push_back(arg ? 1 : 0);
-        }
-        else if constexpr (std::is_same_v<T, uint8_t>) {
-             data.push_back(arg);
-        }
-        else if constexpr (std::is_same_v<T, uint16_t>) {
-             data.push_back(arg & 0xFF);
-             data.push_back((arg >> 8) & 0xFF);
-        }
-        else if constexpr (std::is_same_v<T, uint32_t>) {
-             data.push_back(arg & 0xFF);
-             data.push_back((arg >> 8) & 0xFF);
-             data.push_back((arg >> 16) & 0xFF);
-             data.push_back((arg >> 24) & 0xFF);
-        }
-        else if constexpr (std::is_same_v<T, uint64_t>) {
-             for(int i=0; i<8; ++i) data.push_back((arg >> (i*8)) & 0xFF);
-        }
-        else if constexpr (std::is_same_v<T, int32_t>) {
-             uint32_t u = static_cast<uint32_t>(arg);
-             for(int i=0; i<4; ++i) data.push_back((u >> (i*8)) & 0xFF);
-        }
-        else if constexpr (std::is_same_v<T, float>) {
-             // IEEE-754 LE
-             static_assert(sizeof(float) == 4);
-             uint32_t u;
-             std::memcpy(&u, &arg, 4);
-             for(int i=0; i<4; ++i) data.push_back((u >> (i*8)) & 0xFF);
-        }
-        else if constexpr (std::is_same_v<T, std::string>) {
-             data.assign(arg.begin(), arg.end());
-        }
-        else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) {
-             data = arg;
-        }
-    }, value);
-    
-    return data;
 }
 
 uint16_t BleTransport::get_current_gsn() {
@@ -1875,8 +1622,8 @@ void BleTransport::handle_characteristic_change(uint64_t aid, uint64_t iid,
     std::string uuid = it->second;
     
     bool has_connected_subscribers = false;
-    if (subscriptions_.count(uuid) && !subscriptions_[uuid].empty()) {
-        for (uint16_t conn_id : subscriptions_[uuid]) {
+    if (session_manager_->has_subscribers(uuid)) {
+        for (uint16_t conn_id : session_manager_->get_subscribers(uuid)) {
             if (conn_id != exclude_conn_id) {
                 has_connected_subscribers = true;
                 break;
@@ -1884,7 +1631,7 @@ void BleTransport::handle_characteristic_change(uint64_t aid, uint64_t iid,
         }
     }
     
-    is_connected_ = !connections_.empty();
+    is_connected_ = session_manager_->session_count() > 0;
     
     if (is_connected_ && has_connected_subscribers && supports_connected) {
         config_.system->log(platform::System::LogLevel::Info,
@@ -1928,7 +1675,7 @@ void BleTransport::send_connected_event(uint16_t iid) {
         return;
     }
     
-    if (!subscriptions_.count(uuid) || subscriptions_[uuid].empty()) {
+    if (!session_manager_->has_subscribers(uuid)) {
         config_.system->log(platform::System::LogLevel::Debug,
             "[BleTransport] No subscribers for Connected Event IID=" + std::to_string(iid));
         return;
@@ -1936,7 +1683,7 @@ void BleTransport::send_connected_event(uint16_t iid) {
     
     std::vector<uint8_t> empty_indication;
     
-    for (uint16_t conn_id : subscriptions_[uuid]) {
+    for (uint16_t conn_id : session_manager_->get_subscribers(uuid)) {
         config_.system->log(platform::System::LogLevel::Debug,
             "[BleTransport] Sending zero-length indication to conn=" + std::to_string(conn_id) + 
             " for IID=" + std::to_string(iid));
@@ -2077,12 +1824,7 @@ std::vector<uint8_t> BleTransport::build_encrypted_advertisement_payload(uint16_
     plaintext[2] = iid & 0xFF;
     plaintext[3] = (iid >> 8) & 0xFF;
     
-    core::Format format = core::Format::Data;
-    if (config_.database) {
-        auto ch = config_.database->find_characteristic(1, iid);
-        if (ch) format = ch->format();
-    }
-    std::vector<uint8_t> value_bytes = serialize_value(value, format);
+    std::vector<uint8_t> value_bytes = core::CharacteristicSerializer::to_bytes(value);
     for (size_t i = 0; i < 8 && i < value_bytes.size(); ++i) {
         plaintext[4 + i] = value_bytes[i];
     }
