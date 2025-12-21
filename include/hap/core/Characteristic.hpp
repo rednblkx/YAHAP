@@ -16,11 +16,11 @@ namespace hap::core {
 struct EventSource {
     enum class Type {
         None,
-        Connection      // Triggered by a HAP connection
+        Connection
     };
 
     Type type = Type::None;
-    uint32_t id = 0;    // Connection ID if type == Connection
+    uint32_t id = 0;
 
     static EventSource from_connection(uint32_t conn_id) {
         EventSource source;
@@ -88,17 +88,47 @@ public:
 
     virtual ~Characteristic() = default;
 
-    // Getters
     uint64_t type() const { return type_; }
     Format format() const { return format_; }
     const std::vector<Permission>& permissions() const { return permissions_; }
     uint64_t iid() const { return iid_; }
     void set_iid(uint64_t iid) { iid_ = iid; }
 
+    /**
+     * @brief Dispatcher function type for deferred callback execution.
+     * 
+     * When set, callbacks will be dispatched through this function rather
+     * than executed immediately. This solves stack overflow issues on
+     * constrained platforms like ESP32 where GATT callbacks have limited stack.
+     */
+    using DispatcherFunc = std::function<void(std::function<void()>)>;
+    
+    /**
+     * @brief Set the global dispatcher for all characteristic callbacks.
+     * 
+     * Call this once during initialization to enable deferred execution.
+     * @param dispatcher Function that queues work for later execution
+     */
+    static void set_dispatcher(DispatcherFunc dispatcher) {
+        dispatcher_ = std::move(dispatcher);
+    }
+    
     void set_value(Value value, EventSource source = {}) {
         value_ = coerce_value(std::move(value));
-        if (write_callback_) write_callback_(value_);
-        if (event_callback_) event_callback_(value_, source);
+        
+        if (dispatcher_) {
+            Value captured_value = value_;
+            if (write_callback_ && source.type == EventSource::Type::Connection) {
+                auto cb = write_callback_;
+                dispatcher_([cb, captured_value]() { cb(captured_value); });
+            }
+            if (event_callback_ && source.type != EventSource::Type::Connection) {
+                auto cb = event_callback_;
+                dispatcher_([cb, captured_value, source]() { cb(captured_value, source); });
+            }
+        } else {
+            if (event_callback_) event_callback_(value_, source);
+        }
     }
 
     Value get_value() const {
@@ -106,12 +136,10 @@ public:
         return value_;
     }
 
-    // Callbacks
     void on_read(ReadCallback cb) { read_cb_ = std::move(cb); }
     void set_write_callback(WriteCallback callback) { write_callback_ = std::move(callback); }
     void set_event_callback(EventCallback callback) { event_callback_ = std::move(callback); }
     
-    // Metadata setters (optional fields per HAP spec 6.3.3)
     void set_unit(std::string unit) { unit_ = std::move(unit); }
     void set_min_value(double min) { min_value_ = min; }
     void set_max_value(double max) { max_value_ = max; }
@@ -122,7 +150,6 @@ public:
     void set_valid_values(std::vector<double> values) { valid_values_ = std::move(values); }
     void set_valid_values_range(double start, double end) { valid_values_range_ = std::make_pair(start, end); }
     
-    // Metadata getters
     const std::optional<std::string>& unit() const { return unit_; }
     const std::optional<double>& min_value() const { return min_value_; }
     const std::optional<double>& max_value() const { return max_value_; }
@@ -145,7 +172,6 @@ private:
     WriteCallback write_callback_;
     EventCallback event_callback_;
     
-    // Optional metadata (HAP spec 6.3.3)
     std::optional<std::string> unit_;              // e.g., "celsius", "percentage"
     std::optional<double> min_value_;              // Minimum value
     std::optional<double> max_value_;              // Maximum value
@@ -155,6 +181,8 @@ private:
     std::optional<std::string> description_;       // Human-readable description
     std::optional<std::vector<double>> valid_values_;  // Valid values (enum)
     std::optional<std::pair<double, double>> valid_values_range_; // Valid values range
+    
+    static inline DispatcherFunc dispatcher_;
     
     /**
      * @brief Coerces a value to the correct variant type based on format_
@@ -166,7 +194,6 @@ private:
         return std::visit([this, &input](auto&& arg) -> Value {
             using T = std::decay_t<decltype(arg)>;
             
-            // Only coerce arithmetic types - strings and byte vectors pass through
             if constexpr (std::is_arithmetic_v<T>) {
                 switch (format_) {
                     case Format::Bool:
@@ -184,10 +211,10 @@ private:
                     case Format::Float:
                         return static_cast<float>(arg);
                     default:
-                        return input; // String, TLV8, Data - pass through
+                        return input;
                 }
             } else {
-                return input; // Non-arithmetic types pass through unchanged
+                return input;
             }
         }, input);
     }
