@@ -31,8 +31,11 @@ target_compile_definitions(hap PRIVATE JSON_NOEXCEPTION)
 # Source files (will be populated as we add them)
 target_sources(hap PRIVATE
     src/AccessoryServer.cpp
+    src/common/TaskScheduler.cpp
     src/core/TLV8.cpp
     src/core/AttributeDatabaseJSON.cpp
+    src/core/CharacteristicSerializer.cpp
+    src/core/CharacteristicFinder.cpp
     src/transport/HTTP.cpp
     src/transport/SecureSession.cpp
     src/transport/Router.cpp
@@ -41,6 +44,9 @@ target_sources(hap PRIVATE
     src/transport/ConnectionContext.cpp
     src/transport/PairingEndpoints.cpp
     src/transport/AccessoryEndpoints.cpp
+    src/transport/ble/HapPdu.cpp
+    src/transport/ble/BleTlvBuilder.cpp
+    src/transport/ble/BleSessionManager.cpp
     src/pairing/PairSetup.cpp
     src/pairing/PairVerify.cpp
     src/types/CharacteristicTypes.cpp
