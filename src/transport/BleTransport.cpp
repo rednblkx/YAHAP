@@ -74,7 +74,18 @@ void BleTransport::stop() {
 }
 
 void BleTransport::setup_hap_service() {
-    uint16_t svc_iid = next_iid_++;
+    // Use IIDManager for stable IIDs with dedicated keys for HAP pairing service
+    auto get_iid = [this](const std::string& key) -> uint16_t {
+        if (config_.iid_manager) {
+            return config_.iid_manager->get_or_assign(key);
+        }
+        // Fallback: use hash of key as stable-ish IID
+        uint16_t iid = 1;
+        for (char c : key) iid = ((iid << 5) + iid) ^ c;
+        return (iid & 0x7FFF) + 1;  // Ensure positive, non-zero
+    };
+    
+    uint16_t svc_iid = get_iid("BLE:S:0055");  // HAP Pairing Service
     platform::Ble::ServiceDefinition hap_service;
     hap_service.uuid = kHapPairingServiceUUID;
     hap_service.is_primary = true;
@@ -106,7 +117,7 @@ void BleTransport::setup_hap_service() {
     }
 
     {
-        uint16_t char_iid = next_iid_++;
+        uint16_t char_iid = get_iid("BLE:C:004C:0055");  // Pair Setup
         platform::Ble::CharacteristicDefinition def;
         def.uuid = "0000004C-0000-1000-8000-0026BB765291";
         def.properties = { .read = true, .write = true };
@@ -132,7 +143,7 @@ void BleTransport::setup_hap_service() {
     }
 
     {
-        uint16_t char_iid = next_iid_++;
+        uint16_t char_iid = get_iid("BLE:C:004E:0055");  // Pair Verify
         platform::Ble::CharacteristicDefinition def;
         def.uuid = "0000004E-0000-1000-8000-0026BB765291";
         def.properties.read = true;
@@ -160,8 +171,8 @@ void BleTransport::setup_hap_service() {
 
     {
         config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Adding Pairing Features...");
-         uint16_t char_iid = next_iid_++;
-         platform::Ble::CharacteristicDefinition def;
+        uint16_t char_iid = get_iid("BLE:C:004F:0055");  // Pairing Features
+        platform::Ble::CharacteristicDefinition def;
         def.uuid = "0000004F-0000-1000-8000-0026BB765291";
         def.properties.read = true;
         def.properties.write = true;
@@ -189,7 +200,7 @@ void BleTransport::setup_hap_service() {
 
     {
         config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Adding Pairing Pairings...");
-        uint16_t char_iid = next_iid_++;
+        uint16_t char_iid = get_iid("BLE:C:0050:0055");  // Pairing Pairings
         platform::Ble::CharacteristicDefinition def;
         def.uuid = "00000050-0000-1000-8000-0026BB765291";
         def.properties.read = true;
@@ -219,10 +230,26 @@ void BleTransport::setup_hap_service() {
 
     config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Registering Service...");
     config_.ble->register_service(hap_service);
+    
+    // Save IIDManager state if available
+    if (config_.iid_manager) {
+        config_.iid_manager->save();
+    }
 }
 
 void BleTransport::setup_protocol_info_service() {
-    uint16_t svc_iid = next_iid_++;
+    // Use IIDManager for stable IIDs with dedicated keys for Protocol Info service
+    auto get_iid = [this](const std::string& key) -> uint16_t {
+        if (config_.iid_manager) {
+            return config_.iid_manager->get_or_assign(key);
+        }
+        // Fallback: use hash of key as stable-ish IID
+        uint16_t iid = 1;
+        for (char c : key) iid = ((iid << 5) + iid) ^ c;
+        return (iid & 0x7FFF) + 1;  // Ensure positive, non-zero
+    };
+    
+    uint16_t svc_iid = get_iid("BLE:S:00A2");  // Protocol Information Service
     platform::Ble::ServiceDefinition proto_service;
     proto_service.uuid = kHapProtocolInformationServiceUUID;
     proto_service.is_primary = true;
@@ -254,7 +281,7 @@ void BleTransport::setup_protocol_info_service() {
     }
 
     {
-        uint16_t char_iid = next_iid_++;
+        uint16_t char_iid = get_iid("BLE:C:00A5:00A2");  // Service Signature
         platform::Ble::CharacteristicDefinition def;
         def.uuid = kServiceSignatureCharUUID;
         def.properties = { .read = true, .write = true };
@@ -278,7 +305,7 @@ void BleTransport::setup_protocol_info_service() {
     }
 
     {
-        uint16_t char_iid = next_iid_++;
+        uint16_t char_iid = get_iid("BLE:C:0037:00A2");  // Version
         platform::Ble::CharacteristicDefinition def;
         def.uuid = "00000037-0000-1000-8000-0026BB765291";
         def.properties = { .read = true, .write = true };
@@ -302,6 +329,11 @@ void BleTransport::setup_protocol_info_service() {
     }
 
     config_.ble->register_service(proto_service);
+    
+    // Save IIDManager state if available
+    if (config_.iid_manager) {
+        config_.iid_manager->save();
+    }
 }
 
 void BleTransport::update_advertising() {
@@ -629,6 +661,14 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
     auto find_char_in_db = [&](uint16_t target_iid) -> std::shared_ptr<core::Characteristic> {
         return finder ? finder->by_iid(target_iid) : nullptr;
     };
+    
+    // Helper to get full characteristic info including AID
+    auto find_char_info = [&](uint16_t target_iid) -> core::CharacteristicFinder::CharacteristicInfo {
+        if (finder) {
+            return finder->find_info(target_iid);
+        }
+        return {};
+    };
 
     if (opcode == PDUOpcode::ServiceSignatureRead) {
         state.active = false;
@@ -896,7 +936,9 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                          increment_gsn();
                      }
                      
-                     handle_characteristic_change(1, iid, new_value, connection_id);
+                     // Get actual AID for this characteristic
+                     auto char_info = find_char_info(iid);
+                     handle_characteristic_change(char_info.accessory_id, iid, new_value, connection_id);
                  } else {
                      config_.system->log(platform::System::LogLevel::Warning, 
                          "[BleTransport] Write IID=" + std::to_string(iid) + " - no value TLV found");
@@ -1451,8 +1493,8 @@ void BleTransport::register_services_by_type(uint16_t filter_type) {
             if (filter_type == 0 && svc_type == 0x3E) continue;
             if (filter_type != 0 && svc_type != filter_type) continue;
             
-            uint16_t svc_iid = next_iid_++;
-            svc->set_iid(svc_iid);
+            // Use IID already assigned by AttributeDatabase (via IIDManager)
+            uint16_t svc_iid = static_cast<uint16_t>(svc->iid());
 
             platform::Ble::ServiceDefinition def;
             def.uuid = type_to_uuid_str(svc->type());
@@ -1489,8 +1531,8 @@ void BleTransport::register_services_by_type(uint16_t filter_type) {
             };
 
             for (const auto& ch : svc->characteristics()) {
-                uint16_t char_iid = next_iid_++;
-                ch->set_iid(char_iid);
+                // Use IID already assigned by AttributeDatabase (via IIDManager)
+                uint16_t char_iid = static_cast<uint16_t>(ch->iid());
 
                 std::string char_uuid = type_to_uuid_str(ch->type());
                 platform::Ble::CharacteristicDefinition cdef;

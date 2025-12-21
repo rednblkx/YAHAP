@@ -2,6 +2,7 @@
 
 #include "hap/platform/Ble.hpp"
 #include "hap/core/AttributeDatabase.hpp"
+#include "hap/core/IIDManager.hpp"
 #include "hap/transport/PairingEndpoints.hpp"
 #include "hap/transport/ble/BleSessionManager.hpp"
 #include "hap/common/TaskScheduler.hpp"
@@ -32,6 +33,7 @@ public:
         platform::System* system;
         platform::Storage* storage;
         common::TaskScheduler* scheduler = nullptr;
+        core::IIDManager* iid_manager = nullptr;
         
         std::string accessory_id;
         std::string device_name;
@@ -102,8 +104,6 @@ private:
     static constexpr const char* kHapCharacteristicPropertiesDescUUID = "00000059-0000-1000-8000-0026BB765291";
     
     std::unique_ptr<ble::BleSessionManager> session_manager_;
-
-    uint16_t next_iid_ = 1;
 
     // Mapping (AID, IID) -> Characteristic UUID
     std::map<std::pair<uint64_t, uint64_t>, std::string> instance_map_;

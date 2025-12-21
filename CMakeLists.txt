@@ -36,6 +36,7 @@ target_sources(hap PRIVATE
     src/core/AttributeDatabaseJSON.cpp
     src/core/CharacteristicSerializer.cpp
     src/core/CharacteristicFinder.cpp
+    src/core/IIDManager.cpp
     src/transport/HTTP.cpp
     src/transport/SecureSession.cpp
     src/transport/Router.cpp

@@ -79,6 +79,10 @@ AccessoryServer::AccessoryServer(Config config) : config_(std::move(config)), im
     };
     impl_->pairing_endpoints = std::make_unique<transport::PairingEndpoints>(pairing_config);
     
+    // Initialize IIDManager for persistent IID allocation
+    iid_manager_ = std::make_unique<core::IIDManager>(config_.storage, config_.system);
+    database_.set_iid_manager(iid_manager_.get());
+    
     // Initialize task scheduler first (needed by BleTransport)
     scheduler_ = std::make_unique<common::TaskScheduler>(config_.system);
     
@@ -94,6 +98,7 @@ AccessoryServer::AccessoryServer(Config config) : config_(std::move(config)), im
         ble_config.accessory_id = config_.accessory_id;
         ble_config.device_name = config_.device_name;
         ble_config.category_id = static_cast<uint16_t>(config_.category_id);
+        ble_config.iid_manager = iid_manager_.get();
         impl_->ble_transport = std::make_unique<transport::BleTransport>(ble_config);
         
         // Schedule periodic BLE session timeout checks (every 1 second)
@@ -340,6 +345,11 @@ void AccessoryServer::reset_pairing_state() {
         impl_->ble_transport->set_accessory_id(config_.accessory_id);
     }
     
+    // Reset IIDManager - allows IID reuse after factory reset
+    if (iid_manager_) {
+        iid_manager_->reset();
+    }
+    
     // Clear any active TCP connections
     impl_->connections.clear();
     impl_->parsers.clear();
@@ -573,6 +583,7 @@ void AccessoryServer::broadcast_event(uint64_t aid, uint64_t iid, const core::Va
 }
 
 void AccessoryServer::check_and_update_config_number() {
+    // Build database structure hash
     std::ostringstream hash_input;
     
     for (const auto& acc : database_.accessories()) {
@@ -587,6 +598,7 @@ void AccessoryServer::check_and_update_config_number() {
     
     std::string current_hash_input = hash_input.str();
     
+    // Simple DJB2 hash
     uint32_t hash = 5381;
     for (char c : current_hash_input) {
         hash = ((hash << 5) + hash) + static_cast<uint8_t>(c);
@@ -594,13 +606,20 @@ void AccessoryServer::check_and_update_config_number() {
     
     std::string current_hash = std::to_string(hash);
     
-    auto stored_hash_data = config_.storage->get("db_hash");
-    std::string stored_hash;
-    if (stored_hash_data && !stored_hash_data->empty()) {
-        stored_hash = std::string(stored_hash_data->begin(), stored_hash_data->end());
+    // Check for structure change using IIDManager if available, else direct storage
+    bool structure_changed = false;
+    if (iid_manager_) {
+        structure_changed = iid_manager_->has_structure_changed(current_hash);
+    } else {
+        auto stored_hash_data = config_.storage->get("db_hash");
+        std::string stored_hash;
+        if (stored_hash_data && !stored_hash_data->empty()) {
+            stored_hash = std::string(stored_hash_data->begin(), stored_hash_data->end());
+        }
+        structure_changed = (stored_hash != current_hash);
     }
     
-    if (stored_hash != current_hash) {
+    if (structure_changed) {
         config_.system->log(platform::System::LogLevel::Info, 
             "[AccessoryServer] Database structure changed, incrementing Configuration Number");
         
@@ -615,7 +634,12 @@ void AccessoryServer::check_and_update_config_number() {
         std::string cn_str = std::to_string(cn);
         config_.storage->set("config_number", std::vector<uint8_t>(cn_str.begin(), cn_str.end()));
         
-        config_.storage->set("db_hash", std::vector<uint8_t>(current_hash.begin(), current_hash.end()));
+        // Update stored hash
+        if (iid_manager_) {
+            iid_manager_->update_stored_hash(current_hash);
+        } else {
+            config_.storage->set("db_hash", std::vector<uint8_t>(current_hash.begin(), current_hash.end()));
+        }
         
         config_.system->log(platform::System::LogLevel::Info, 
             "[AccessoryServer] Configuration Number updated to: " + cn_str);

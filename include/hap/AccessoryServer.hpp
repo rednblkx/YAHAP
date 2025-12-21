@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hap/core/AttributeDatabase.hpp"
+#include "hap/core/IIDManager.hpp"
 #include "hap/platform/CryptoSRP.hpp"
 #include "hap/platform/Network.hpp"
 #include "hap/platform/Storage.hpp"
@@ -88,6 +89,7 @@ private:
     class Impl;
     std::unique_ptr<Impl> impl_;
     std::unique_ptr<common::TaskScheduler> scheduler_;
+    std::unique_ptr<core::IIDManager> iid_manager_;
     
     // Private member functions
     void setup_routes();
