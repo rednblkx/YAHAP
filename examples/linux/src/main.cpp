@@ -98,7 +98,7 @@ int main() {
     
     // Keep running
     while (true) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        g_server->tick();
     }
 
     return 0;

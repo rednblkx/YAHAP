@@ -87,4 +87,9 @@ extern "C" void app_main() {
 
     ESP_LOGI(TAG, "Starting Server...");
     server.start();
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        server.tick();
+    }
+    
 }
