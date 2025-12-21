@@ -402,10 +402,6 @@ int Esp32Ble::ble_gap_event(struct ble_gap_event *event, void *arg) {
                 if (self && self->disconnect_callback_) {
                     self->disconnect_callback_(event->disconnect.conn.conn_handle);
                 }
-                if (self && last_adv) {
-                    ESP_LOGI(TAG, "Restarting advertising after disconnect");
-                    self->start_advertising(*last_adv, last_adv_interval);
-                }
             }
             break;
         case BLE_GAP_EVENT_SUBSCRIBE:
