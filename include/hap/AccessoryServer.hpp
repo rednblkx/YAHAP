@@ -10,6 +10,10 @@
 #include <memory>
 #include <string>
 
+namespace hap::common {
+class TaskScheduler;
+}
+
 namespace hap {
 
 /**
@@ -67,14 +71,23 @@ public:
      */
     void factory_reset();
 
+    /**
+     * @brief Process periodic tasks. Call this regularly from your main loop.
+     * 
+     * Handles: session timeouts, GSN updates, characteristic change notifications.
+     * Recommended call frequency: every 100-500ms.
+     */
+    void tick();
+
 private:
     Config config_;
     core::AttributeDatabase database_;
     bool mdns_registered_ = false;  // Track whether mDNS service has been registered
     
-    // Router and endpoints (forward declared to reduce header dependencies)
+    // Router, scheduler, and endpoints (forward declared to reduce header dependencies)
     class Impl;
     std::unique_ptr<Impl> impl_;
+    std::unique_ptr<common::TaskScheduler> scheduler_;
     
     // Private member functions
     void setup_routes();

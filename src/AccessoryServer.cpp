@@ -1,4 +1,5 @@
 #include "hap/AccessoryServer.hpp"
+#include "hap/common/TaskScheduler.hpp"
 #include "hap/transport/Router.hpp"
 #include "hap/transport/BleTransport.hpp"
 #include "hap/transport/ConnectionContext.hpp"
@@ -78,6 +79,9 @@ AccessoryServer::AccessoryServer(Config config) : config_(std::move(config)), im
     };
     impl_->pairing_endpoints = std::make_unique<transport::PairingEndpoints>(pairing_config);
     
+    // Initialize task scheduler first (needed by BleTransport)
+    scheduler_ = std::make_unique<common::TaskScheduler>(config_.system);
+    
     if (config_.ble) {
         transport::BleTransport::Config ble_config;
         ble_config.ble = config_.ble;
@@ -86,10 +90,16 @@ AccessoryServer::AccessoryServer(Config config) : config_(std::move(config)), im
         ble_config.pairing_endpoints = impl_->pairing_endpoints.get();
         ble_config.system = config_.system;
         ble_config.storage = config_.storage;
+        ble_config.scheduler = scheduler_.get();
         ble_config.accessory_id = config_.accessory_id;
         ble_config.device_name = config_.device_name;
         ble_config.category_id = static_cast<uint16_t>(config_.category_id);
         impl_->ble_transport = std::make_unique<transport::BleTransport>(ble_config);
+        
+        // Schedule periodic BLE session timeout checks (every 1 second)
+        scheduler_->schedule_periodic(1000, [this]() {
+            impl_->ble_transport->check_session_timeouts();
+        });
     }
     
     impl_->accessory_endpoints = std::make_unique<transport::AccessoryEndpoints>(&database_);
@@ -97,6 +107,12 @@ AccessoryServer::AccessoryServer(Config config) : config_(std::move(config)), im
     // Initialize router
     impl_->router = std::make_unique<transport::Router>();
     setup_routes();
+    
+    // Set up deferred callback execution for characteristic value changes
+    // This avoids stack overflow on platforms with limited callback stack (e.g., ESP32 GATT)
+    core::Characteristic::set_dispatcher([this](std::function<void()> work) {
+        scheduler_->schedule_once(0, std::move(work));
+    });
 }
 
 AccessoryServer::~AccessoryServer() = default;
@@ -127,7 +143,10 @@ void AccessoryServer::add_accessory(std::shared_ptr<core::Accessory> accessory) 
                     if (source.type == core::EventSource::Type::Connection) {
                         exclude_id = source.id;
                     }
-                    broadcast_event(aid, iid, value, exclude_id);
+                    
+                    if(source.type != core::EventSource::Type::Connection) {
+                      broadcast_event(aid, iid, value, exclude_id);
+                    }
                 });
             }
         }
@@ -340,6 +359,12 @@ void AccessoryServer::factory_reset() {
     
     config_.system->log(platform::System::LogLevel::Info, 
         "[AccessoryServer] Factory reset complete - accessory is now unpaired");
+}
+
+void AccessoryServer::tick() {
+    if (scheduler_) {
+        scheduler_->tick();
+    }
 }
 
 void AccessoryServer::on_tcp_receive(uint32_t connection_id, std::span<const uint8_t> data) {
