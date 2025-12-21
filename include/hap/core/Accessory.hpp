@@ -47,7 +47,15 @@ enum class AccessoryCategory : uint16_t {
 
 /**
  * @brief HAP Accessory
+ * 
+ * For bridge configurations:
+ * - Create the bridge accessory with AID=1 (required per HAP Spec 2.5.3.3)
+ * - Create bridged accessories with AID=2, 3, 4... (up to 150 total)
+ * - Add all accessories to AccessoryServer
+ * - The bridge accessory should use category=Bridge
+ * 
  */
+
 class Accessory {
 public:
     Accessory(uint64_t aid) : aid_(aid) {}
