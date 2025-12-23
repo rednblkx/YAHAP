@@ -111,14 +111,6 @@ struct Ble {
     virtual void register_service(const ServiceDefinition& service) = 0;
 
     /**
-     * @brief Send a notification (or indication) to a connected client.
-     * @param connection_id The ID of the connection to send to.
-     * @param characteristic_uuid The UUID of the characteristic (must match a registered one).
-     * @param data The data to send.
-     */
-    virtual void send_notification(uint16_t connection_id, const std::string& characteristic_uuid, std::span<const uint8_t> data) = 0;
-
-    /**
      * @brief Disconnect a specific client.
      */
     virtual void disconnect(uint16_t connection_id) = 0;
@@ -147,11 +139,7 @@ struct Ble {
      * @return true if indication was queued successfully.
      */
     virtual bool send_indication(uint16_t connection_id, const std::string& characteristic_uuid, 
-                                  std::span<const uint8_t> data) { 
-        // Default implementation uses send_notification (may not wait for ACK)
-        send_notification(connection_id, characteristic_uuid, data);
-        return true;
-    }
+                                  std::span<const uint8_t> data) = 0;
 
     /**
      * @brief Encrypted advertisement data for HAP BLE Broadcasted Events.

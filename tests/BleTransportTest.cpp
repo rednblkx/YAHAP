@@ -76,9 +76,9 @@ public:
     void stop_advertising() override {}
     void start() override {}
     
-    void send_notification(uint16_t connection_id, const std::string& char_uuid, std::span<const uint8_t> data) override {
-        // printf("MockBle::send_notification conn=%d uuid=%s len=%zu\n", connection_id, char_uuid.c_str(), data.size());
+    bool send_indication(uint16_t connection_id, const std::string& char_uuid, std::span<const uint8_t> data) override {
         sent_notifications.push_back({connection_id, char_uuid, std::vector<uint8_t>(data.begin(), data.end())});
+        return true;
     }
     
     void disconnect(uint16_t connection_id) override { (void)connection_id; }

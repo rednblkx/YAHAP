@@ -15,7 +15,7 @@ public:
     void start_advertising(const Advertisement& data, uint32_t interval_ms) override;
     void stop_advertising() override;
     void register_service(const ServiceDefinition& service) override;
-    void send_notification(uint16_t connection_id, const std::string& characteristic_uuid, std::span<const uint8_t> data) override;
+    bool send_indication(uint16_t connection_id, const std::string& characteristic_uuid, std::span<const uint8_t> data) override;
     void disconnect(uint16_t connection_id) override;
     void set_disconnect_callback(DisconnectCallback callback) override;
     void start_timed_advertising(const Advertisement& data,

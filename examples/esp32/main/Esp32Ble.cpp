@@ -223,7 +223,7 @@ void Esp32Ble::start_timed_advertising(const Advertisement& data,
     }
 }
 
-void Esp32Ble::send_notification(uint16_t connection_id, const std::string& characteristic_uuid, std::span<const uint8_t> data) {
+bool Esp32Ble::send_indication(uint16_t connection_id, const std::string& characteristic_uuid, std::span<const uint8_t> data) {
     uint16_t attr_handle = 0;
     
     for (auto* ctx : all_contexts) {
@@ -235,9 +235,10 @@ void Esp32Ble::send_notification(uint16_t connection_id, const std::string& char
     
     if (attr_handle != 0) {
         struct os_mbuf *om = ble_hs_mbuf_from_flat(data.data(), data.size());
-        ble_gatts_notify_custom(connection_id, attr_handle, om);
+        return !ble_gatts_indicate_custom(connection_id, attr_handle, om);
     } else {
-        ESP_LOGW(TAG, "Characteristic %s not found for notification", characteristic_uuid.c_str());
+        ESP_LOGW(TAG, "Characteristic %s not found for indication", characteristic_uuid.c_str());
+        return false;
     }
 }
 
