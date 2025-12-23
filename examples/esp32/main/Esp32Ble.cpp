@@ -81,8 +81,6 @@ Esp32Ble::Esp32Ble() {
     ble_hs_cfg.reset_cb = [](int reason){
         ESP_LOGI(TAG, "NimBLE Reset: %d", reason);
     };
-    
-    ble_svc_gap_device_name_set("HAP Accessory");
 }
 
 void Esp32Ble::start() {
