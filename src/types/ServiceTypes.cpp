@@ -79,7 +79,31 @@ AccessoryInformationBuilder& AccessoryInformationBuilder::on_identify(std::funct
     return *this;
 }
 
+AccessoryInformationBuilder& AccessoryInformationBuilder::hardwareFinish(std::vector<uint8_t> value) {
+    if (!hardwareFinish_char_) {
+        hardwareFinish_char_ = chr::HardwareFinish();
+        add_characteristic(hardwareFinish_char_);
+    }
+    hardwareFinish_char_->set_value(std::move(value));
+    return *this;
+}
+
 std::shared_ptr<Service> AccessoryInformationBuilder::build() {
+    return service_;
+}
+
+//============================================================================== 
+// ProtocolInformationBuilder
+//==============================================================================
+
+HAPProtocolInformationBuilder::HAPProtocolInformationBuilder() {
+    service_ = std::make_shared<Service>(kType_HAPProtocolInformation, "Protocol Information");
+    
+    version_char_ = chr::Version();
+    add_characteristic(version_char_);
+}
+
+std::shared_ptr<Service> HAPProtocolInformationBuilder::build() {
     return service_;
 }
 
@@ -465,8 +489,38 @@ std::shared_ptr<Service> LockMechanismBuilder::build() {
     return service_;
 }
 
+//============================================================================== 
+// NFC Access Service Builder
 //==============================================================================
-// LockManagementBuilder (9.6) - MANDATORY for Lock Profile per HAP Spec 11.2
+
+NFCAccessBuilder::NFCAccessBuilder() {
+    service_ = std::make_shared<Service>(kType_NFCAccess, "NFC Access");
+    
+    configuration_state_ = chr::ConfigurationState();
+    nfc_access_supported_configuration_ = chr::NFCAccessSupportedConfiguration();
+    nfc_access_control_point_ = chr::NFCAccessControlPoint();
+    
+    add_characteristic(nfc_access_control_point_);
+    add_characteristic(nfc_access_supported_configuration_);
+    add_characteristic(configuration_state_);
+}
+
+NFCAccessBuilder& NFCAccessBuilder::on_control_point(std::function<std::optional<Value>(const std::vector<uint8_t>& tlv)> callback) {
+  nfc_access_control_point_->set_write_response_callback([callback](const core::Value& input) {
+    return callback ? callback(std::get<std::vector<uint8_t>>(input)) : std::nullopt;
+  });
+  return *this;
+}
+
+std::shared_ptr<Service> NFCAccessBuilder::build() {
+    return service_;
+}
+
+//==============================================================================
+// Lock Management Service Builder
+// Required: LockControlPoint, Version
+// Optional: Logs, AudioFeedback, LockManagementAutoSecurityTimeout,
+//           AdministratorOnlyAccess, LockLastKnownAction, CurrentDoorState, MotionDetected
 //==============================================================================
 
 LockManagementBuilder::LockManagementBuilder() {
@@ -475,7 +529,6 @@ LockManagementBuilder::LockManagementBuilder() {
     // Required characteristics
     lock_control_point_ = chr::LockControlPoint();
     version_ = chr::Version();
-    version_->set_value(std::string("1.0")); // HAP Spec 11.2.2.2: "The value of this characteristic must be the string '1.0'."
     
     add_characteristic(lock_control_point_);
     add_characteristic(version_);

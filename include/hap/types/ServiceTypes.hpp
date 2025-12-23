@@ -35,6 +35,7 @@ constexpr uint64_t kType_GarageDoorOpener = 0x41;           // 9.4
 constexpr uint64_t kType_LightBulb = 0x43;                  // 9.5
 constexpr uint64_t kType_LockManagement = 0x44;             // 9.6
 constexpr uint64_t kType_LockMechanism = 0x45;              // 9.7
+constexpr uint64_t kType_NFCAccess = 0x266;
 constexpr uint64_t kType_Outlet = 0x47;                     // 9.8
 constexpr uint64_t kType_Switch = 0x49;                     // 9.9
 constexpr uint64_t kType_Thermostat = 0x4A;                 // 9.10
@@ -108,6 +109,7 @@ public:
     AccessoryInformationBuilder& firmware_revision(std::string value);
     AccessoryInformationBuilder& hardware_revision(std::string value);
     AccessoryInformationBuilder& on_identify(std::function<void()> callback);
+    AccessoryInformationBuilder& hardwareFinish(std::vector<uint8_t> value);
     
     std::shared_ptr<core::Service> build();
 
@@ -119,6 +121,22 @@ private:
     std::shared_ptr<core::Characteristic> firmware_char_;
     std::shared_ptr<core::Characteristic> hardware_char_;
     std::shared_ptr<core::Characteristic> identify_char_;
+    std::shared_ptr<core::Characteristic> hardwareFinish_char_;
+};
+
+//============================================================================== 
+// Protocol Information Service Builder
+// Required: Version
+//==============================================================================
+
+class HAPProtocolInformationBuilder : public ServiceBuilderBase {
+public:
+    HAPProtocolInformationBuilder();
+    
+    std::shared_ptr<core::Service> build();
+
+private:
+    std::shared_ptr<core::Characteristic> version_char_;
 };
 
 //==============================================================================
@@ -367,6 +385,25 @@ public:
 private:
     std::shared_ptr<core::Characteristic> lock_current_state_;
     std::shared_ptr<core::Characteristic> lock_target_state_;
+};
+
+//==============================================================================
+// NFC Access Service Builder
+// Required: NFCAccessControlPoint, NFCAccessSupportedConfiguration, ConfigurationState
+//==============================================================================
+
+class NFCAccessBuilder : public ServiceBuilderBase {
+public:
+    NFCAccessBuilder();
+    
+    NFCAccessBuilder& on_control_point(std::function<std::optional<core::Value>(const std::vector<uint8_t>& tlv)> callback);
+
+    std::shared_ptr<core::Service> build();
+
+private:
+    std::shared_ptr<core::Characteristic> nfc_access_control_point_;
+    std::shared_ptr<core::Characteristic> nfc_access_supported_configuration_;
+    std::shared_ptr<core::Characteristic> configuration_state_;
 };
 
 //==============================================================================

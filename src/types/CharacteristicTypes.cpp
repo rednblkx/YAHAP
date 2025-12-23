@@ -7,6 +7,7 @@
  */
 
 #include "hap/types/CharacteristicTypes.hpp"
+#include "hap/core/TLV8.hpp"
 
 namespace hap::characteristic {
 
@@ -20,6 +21,7 @@ using namespace hap::core;
 #define PERM_PR_NT  std::vector{Permission::PairedRead, Permission::Notify}
 #define PERM_PR_PW  std::vector{Permission::PairedRead, Permission::PairedWrite}
 #define PERM_PR_PW_NT std::vector{Permission::PairedRead, Permission::PairedWrite, Permission::Notify}
+#define PERM_PR_PW_WR std::vector{Permission::PairedRead, Permission::PairedWrite, Permission::WriteResponse}
 
 //==============================================================================
 // Accessory Information Characteristics
@@ -74,6 +76,12 @@ std::shared_ptr<Characteristic> SerialNumber() {
     auto c = std::make_shared<Characteristic>(kType_SerialNumber, Format::String, PERM_PR);
     c->set_max_len(64);
     c->set_value(std::string(""));
+    return c;
+}
+
+std::shared_ptr<Characteristic> HardwareFinish() {
+    auto c = std::make_shared<Characteristic>(kType_HardwareFinish, Format::TLV8, PERM_PR);
+    c->set_value(TLV8::encode({TLV(0x01,{0xce,0xd5,0xda,0x00})}));
     return c;
 }
 
@@ -920,6 +928,28 @@ std::shared_ptr<Characteristic> CarbonDioxidePeakLevel() {
     return c;
 }
 
+//============================================================================== 
+// NFC Access Characteristics
+//==============================================================================
+
+std::shared_ptr<Characteristic> NFCAccessControlPoint() {
+    auto c = std::make_shared<Characteristic>(kType_NFCAccessControlPoint, Format::TLV8, PERM_PR_PW_WR);
+    c->set_value(TLV8::encode({}));
+    return c;
+}
+
+std::shared_ptr<Characteristic> NFCAccessSupportedConfiguration() {
+    auto c = std::make_shared<Characteristic>(kType_NFCAccessSupportedConfiguration, Format::TLV8, PERM_PR);
+    c->set_value(TLV8::encode({TLV(0x01,0x10), TLV(0x02,0x10)}));
+    return c;
+}
+
+std::shared_ptr<Characteristic> ConfigurationState() {
+    auto c = std::make_shared<Characteristic>(kType_ConfigurationState, Format::UInt16, PERM_PR_NT);
+    c->set_value(static_cast<uint8_t>(0));
+    return c;
+}
+
 //==============================================================================
 // Lock Management Characteristics
 //==============================================================================
@@ -963,7 +993,7 @@ std::shared_ptr<Characteristic> Logs() {
 
 std::shared_ptr<Characteristic> Version() {
     auto c = std::make_shared<Characteristic>(kType_Version, Format::String, PERM_PR);
-    c->set_value(std::string("1.1.0"));
+    c->set_value(std::string("1.0.0"));
     return c;
 }
 

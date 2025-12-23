@@ -29,6 +29,7 @@ constexpr uint64_t kType_Manufacturer = 0x20;
 constexpr uint64_t kType_Model = 0x21;
 constexpr uint64_t kType_Name = 0x23;
 constexpr uint64_t kType_SerialNumber = 0x30;
+constexpr uint64_t kType_HardwareFinish = 0x26C;
 
 // Lightbulb
 constexpr uint64_t kType_On = 0x25;
@@ -64,6 +65,11 @@ constexpr uint64_t kType_LockControlPoint = 0x19;
 constexpr uint64_t kType_LockLastKnownAction = 0x1C;
 constexpr uint64_t kType_LockManagementAutoSecurityTimeout = 0x1A;
 constexpr uint64_t kType_LockPhysicalControls = 0xA7;
+
+// NFC Access
+constexpr uint64_t kType_NFCAccessControlPoint = 0x264;
+constexpr uint64_t kType_NFCAccessSupportedConfiguration = 0x265;
+constexpr uint64_t kType_ConfigurationState = 0x263;
 
 // Fan
 constexpr uint64_t kType_Active = 0xB0;
@@ -347,6 +353,7 @@ std::shared_ptr<core::Characteristic> Manufacturer();
 std::shared_ptr<core::Characteristic> Model();
 std::shared_ptr<core::Characteristic> Name();
 std::shared_ptr<core::Characteristic> SerialNumber();
+std::shared_ptr<core::Characteristic> HardwareFinish();
 
 // Lightbulb Characteristics
 std::shared_ptr<core::Characteristic> On();
@@ -483,6 +490,11 @@ std::shared_ptr<core::Characteristic> AirParticulateDensity();
 std::shared_ptr<core::Characteristic> AirParticulateSize();
 std::shared_ptr<core::Characteristic> CarbonMonoxidePeakLevel();
 std::shared_ptr<core::Characteristic> CarbonDioxidePeakLevel();
+
+// NFC Access Characteristics
+std::shared_ptr<core::Characteristic> NFCAccessControlPoint();
+std::shared_ptr<core::Characteristic> NFCAccessSupportedConfiguration();
+std::shared_ptr<core::Characteristic> ConfigurationState();
 
 // Lock Management Characteristics
 std::shared_ptr<core::Characteristic> LockControlPoint();
