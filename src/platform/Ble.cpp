@@ -7,7 +7,7 @@ Ble::Advertisement Ble::Advertisement::create_hap(
     uint8_t device_id[6], 
     uint16_t category_id, 
     uint16_t global_state_number,
-    uint16_t config_number,
+    uint8_t config_number,
     uint8_t pair_setup_hash[4]
 ) {
     Ble::Advertisement adv;
@@ -56,8 +56,7 @@ Ble::Advertisement Ble::Advertisement::create_hap(
     adv.manufacturer_data.push_back((global_state_number >> 8) & 0xFF);
 
     // CN: Configuration Number (1 byte, range 1-255, wraps to 1)
-    // Note: config_number is uint16_t but spec requires 1 byte
-    adv.manufacturer_data.push_back(static_cast<uint8_t>(config_number & 0xFF));
+    adv.manufacturer_data.push_back(config_number);
 
     // CV: Compatible Version (1 byte) - 0x02 for HAP-BLE 2.0
     adv.manufacturer_data.push_back(0x02);

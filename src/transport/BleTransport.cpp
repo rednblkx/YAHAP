@@ -394,11 +394,11 @@ void BleTransport::update_advertising() {
         config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Initialized GSN to 1");
     }
 
-    uint16_t config_number = 1;
+    uint8_t config_number = 1;
     auto cn_bytes = config_.storage->get("config_number");
     if (cn_bytes && !cn_bytes->empty()) {
         std::string cn_str(cn_bytes->begin(), cn_bytes->end());
-        config_number = static_cast<uint16_t>(std::stoi(cn_str));
+        config_number = static_cast<uint8_t>(std::stoi(cn_str));
     }
 
     auto adv = platform::Ble::Advertisement::create_hap(
@@ -1238,7 +1238,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
             
             // Configuration Number TLV (0x02)
             resp_tlvs.emplace_back(0x02, std::vector<uint8_t>{
-                static_cast<uint8_t>(config_.config_number & 0xFF)
+                config_.config_number
             });
             
             // Accessory Advertising Identifier TLV (0x03) - 6 bytes
@@ -1822,11 +1822,11 @@ void BleTransport::send_disconnected_event(uint16_t iid) {
     
     uint16_t gsn = get_current_gsn();
     
-    uint16_t config_number = 1;
+    uint8_t config_number = 1;
     auto cn_bytes = config_.storage->get("config_number");
     if (cn_bytes && !cn_bytes->empty()) {
         std::string cn_str(cn_bytes->begin(), cn_bytes->end());
-        config_number = static_cast<uint16_t>(std::stoi(cn_str));
+        config_number = static_cast<uint8_t>(std::stoi(cn_str));
     }
     
     auto adv = platform::Ble::Advertisement::create_hap(

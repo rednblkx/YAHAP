@@ -198,7 +198,7 @@ void run_advertising_test() {
     uint8_t device_id[] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
     uint16_t category = 5;
     uint16_t gsn = 1;
-    uint16_t config_num = 1;
+    uint8_t config_num = 1;
     uint8_t hash[] = {0xAA, 0xBB, 0xCC, 0xDD};
 
     auto adv = platform::Ble::Advertisement::create_hap(status, device_id, category, gsn, config_num, hash);
@@ -222,7 +222,7 @@ void run_advertising_test() {
     ASSERT_EQ((int)adv.manufacturer_data[12], (gsn >> 8) & 0xFF);
     
     // Verify CN (1 byte)
-    ASSERT_EQ((int)adv.manufacturer_data[13], config_num & 0xFF);
+    ASSERT_EQ((int)adv.manufacturer_data[13], config_num);
     
     // Verify CV (Compatible Version = 0x02)
     ASSERT_EQ((int)adv.manufacturer_data[14], 0x02);

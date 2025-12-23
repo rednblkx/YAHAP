@@ -38,7 +38,7 @@ public:
         std::string accessory_id;
         std::string device_name;
         uint16_t category_id = 5; // Default to Lightbulb
-        uint16_t config_number = 1;
+        uint8_t config_number = 1;
     };
 
     BleTransport(Config config);

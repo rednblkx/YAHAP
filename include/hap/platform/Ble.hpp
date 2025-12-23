@@ -35,7 +35,7 @@ struct Ble {
             uint8_t device_id[6], 
             uint16_t category_id, 
             uint16_t global_state_number,
-            uint16_t config_number,
+            uint8_t config_number,
             uint8_t pair_setup_hash[4]
         );
 
