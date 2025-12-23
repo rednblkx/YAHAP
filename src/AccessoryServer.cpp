@@ -304,8 +304,6 @@ void AccessoryServer::reset_pairing_state() {
         "accessory_ltpk",    // Long-term public key
         "pairing_list",      // List of paired controllers
         "gsn",               // Global State Number
-        "config_number",     // Configuration number
-        "db_hash",           // Database hash (for config number)
     };
     
     for (const char* key : keys_to_clear) {
@@ -640,7 +638,7 @@ void AccessoryServer::check_and_update_config_number() {
         } else {
             config_.storage->set("db_hash", std::vector<uint8_t>(current_hash.begin(), current_hash.end()));
         }
-        
+
         config_.system->log(platform::System::LogLevel::Info, 
             "[AccessoryServer] Configuration Number updated to: " + cn_str);
     } else {
