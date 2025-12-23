@@ -7,6 +7,7 @@
 #include "hap/core/TLV8.hpp"
 #include <memory>
 #include <vector>
+#include <array>
 #include <optional>
 #include <string>
 #include <functional>
@@ -32,7 +33,8 @@ public:
         platform::System* system;
         std::string accessory_id;      // e.g., "12:34:56:78:9A:BC"
         std::string setup_code;        // 8-digit PIN (e.g., "123-45-678")
-        std::function<void()> on_pairings_changed = nullptr;
+        /// Callback for pairing changes: (pairing_id, ltpk, is_add)
+        std::function<void(const std::string&, const std::array<uint8_t, 32>&, bool)> on_pairings_changed = nullptr;
     };
 
     PairSetup(Config config);

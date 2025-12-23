@@ -60,14 +60,15 @@ AccessoryServer::AccessoryServer(Config config) : config_(std::move(config)), im
     pairing_config.system = config_.system;
     pairing_config.accessory_id = config_.accessory_id;
     pairing_config.setup_code = config_.setup_code;
-    pairing_config.on_pairings_changed = [this]() {
-        config_.system->log(platform::System::LogLevel::Info, "[AccessoryServer] Pairings changed, updating mDNS and BLE advertising");
+    pairing_config.on_pairings_changed = [this](const std::string& pairing_id, const std::array<uint8_t, 32>& ltpk, bool is_add) {
+        config_.system->log(platform::System::LogLevel::Info, 
+            "[AccessoryServer] Pairing " + std::string(is_add ? "added" : "removed") + ": " + pairing_id);
         
         // Check if all pairings have been removed
         auto pairing_list_data = config_.storage->get("pairing_list");
-        bool is_unpaired = !pairing_list_data || pairing_list_data->size() <= 2;
+        bool is_paired = pairing_list_data && pairing_list_data->size() > 2;
         
-        if (is_unpaired) {
+        if (!is_paired) {
             // Clear all state and regenerate identifiers
             reset_pairing_state();
         }
@@ -75,6 +76,15 @@ AccessoryServer::AccessoryServer(Config config) : config_(std::move(config)), im
         update_mdns();
         if (impl_->ble_transport) {
             impl_->ble_transport->update_advertising();
+        }
+        
+        // Invoke user callback if set
+        if (config_.on_pairings_changed) {
+            PairingEvent event;
+            event.type = is_add ? PairingEventType::Added : PairingEventType::Removed;
+            event.pairing_id = pairing_id;
+            event.ltpk = ltpk;
+            config_.on_pairings_changed(event);
         }
     };
     impl_->pairing_endpoints = std::make_unique<transport::PairingEndpoints>(pairing_config);
@@ -363,6 +373,15 @@ void AccessoryServer::factory_reset() {
     update_mdns();
     if (impl_->ble_transport) {
         impl_->ble_transport->update_advertising();
+    }
+    
+    // Invoke user callback if set (device is now unpaired)
+    if (config_.on_pairings_changed) {
+        PairingEvent event;
+        event.type = PairingEventType::AllRemoved;
+        event.pairing_id = "";  // All pairings removed
+        event.ltpk = {};        // No specific LTPK
+        config_.on_pairings_changed(event);
     }
     
     config_.system->log(platform::System::LogLevel::Info, 

@@ -279,7 +279,7 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m5(const std::vector<core:
         config_.storage->set("pairing_list", list_bytes);
         
         if (config_.on_pairings_changed) {
-            config_.on_pairings_changed();
+            config_.on_pairings_changed(pairing_id, ios_ltpk_arr, true);
         }
     }
     

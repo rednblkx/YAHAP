@@ -8,6 +8,7 @@
 #include "hap/platform/System.hpp"
 #include "hap/platform/CryptoSRP.hpp"
 #include <string>
+#include <array>
 #include <map>
 #include <functional>
 
@@ -24,7 +25,8 @@ public:
         platform::System* system;
         std::string accessory_id;
         std::string setup_code;
-        std::function<void()> on_pairings_changed = nullptr;
+        /// Callback for pairing changes: (pairing_id, ltpk, is_add)
+        std::function<void(const std::string&, const std::array<uint8_t, 32>&, bool)> on_pairings_changed = nullptr;
     };
 
     PairingEndpoints(Config config);

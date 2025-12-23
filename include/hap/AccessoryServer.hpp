@@ -8,6 +8,8 @@
 #include "hap/platform/System.hpp"
 #include "hap/platform/Ble.hpp"
 
+#include <array>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -16,6 +18,24 @@ class TaskScheduler;
 }
 
 namespace hap {
+
+/**
+ * @brief Type of pairing change event
+ */
+enum class PairingEventType {
+    Added,      ///< A new controller was paired
+    Removed,    ///< A controller was unpaired
+    AllRemoved  ///< All controllers were unpaired (factory reset)
+};
+
+/**
+ * @brief Information about a pairing change event
+ */
+struct PairingEvent {
+    PairingEventType type;              ///< Type of event
+    std::string pairing_id;             ///< Controller's pairing identifier (UUID)
+    std::array<uint8_t, 32> ltpk;       ///< Controller's Long-Term Public Key (Ed25519)
+};
 
 /**
  * @brief Main HAP Accessory Server
@@ -37,6 +57,13 @@ public:
         core::AccessoryCategory category_id = core::AccessoryCategory::Lightbulb;
         
         std::function<void()> on_identify;
+        
+        /**
+         * @brief Callback invoked when pairings change (added/removed/factory reset).
+         * @param event Contains the type of change (Added/Removed/AllRemoved), the controller's
+         *              pairing ID (UUID string), and the controller's LTPK (Ed25519 public key).
+         */
+        std::function<void(const PairingEvent& /*event*/)> on_pairings_changed;
     };
 
     AccessoryServer(Config config);

@@ -155,7 +155,11 @@ Response PairingEndpoints::handle_pairings(const Request& req, ConnectionContext
                     list_json.push_back(pairing_id);
                     std::string list_str = list_json.dump();
                     config_.storage->set("pairing_list", std::vector<uint8_t>(list_str.begin(), list_str.end()));
-                    if (config_.on_pairings_changed) config_.on_pairings_changed();
+                    if (config_.on_pairings_changed) {
+                        std::array<uint8_t, 32> ltpk_arr;
+                        std::copy_n(public_key->begin(), 32, ltpk_arr.begin());
+                        config_.on_pairings_changed(pairing_id, ltpk_arr, true);
+                    }
                 }
             }
         }
@@ -169,6 +173,14 @@ Response PairingEndpoints::handle_pairings(const Request& req, ConnectionContext
             } else {
                 std::string pairing_id(identifier->begin(), identifier->end());
                 std::string pairing_key = "pairing_" + pairing_id;
+                
+                // Get LTPK before removing (for callback)
+                std::array<uint8_t, 32> ltpk_arr{};
+                auto ltpk_data = config_.storage->get(pairing_key);
+                if (ltpk_data && ltpk_data->size() == 32) {
+                    std::copy_n(ltpk_data->begin(), 32, ltpk_arr.begin());
+                }
+                
                 config_.storage->remove(pairing_key);
                 
                 // Update list
@@ -185,7 +197,9 @@ Response PairingEndpoints::handle_pairings(const Request& req, ConnectionContext
                         }
                         std::string list_str = list_json.dump();
                         config_.storage->set("pairing_list", std::vector<uint8_t>(list_str.begin(), list_str.end()));
-                        if (config_.on_pairings_changed) config_.on_pairings_changed();
+                        if (config_.on_pairings_changed) {
+                            config_.on_pairings_changed(pairing_id, ltpk_arr, false);
+                        }
                     }
                 }
                 
