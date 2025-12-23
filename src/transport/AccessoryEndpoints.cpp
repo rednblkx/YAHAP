@@ -303,7 +303,13 @@ Response AccessoryEndpoints::handle_put_characteristics(const Request& req, Conn
             
             if (status == core::to_int(core::HAPStatus::Success) && 
                 core::has_permission(characteristic->permissions(), core::Permission::WriteResponse)) {
-                auto value = characteristic->get_value();
+                core::Value value;
+                auto response_val = characteristic->handle_write_response(characteristic->get_value());
+                if (response_val.has_value()) {
+                    value = *response_val;
+                } else {
+                    value = characteristic->get_value();
+                }
                 std::visit([&char_json](auto&& arg) {
                     using T = std::decay_t<decltype(arg)>;
                     if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, uint8_t> || 
@@ -311,6 +317,8 @@ Response AccessoryEndpoints::handle_put_characteristics(const Request& req, Conn
                                     std::is_same_v<T, uint64_t> || std::is_same_v<T, int32_t> || 
                                     std::is_same_v<T, float> || std::is_same_v<T, std::string>) {
                         char_json["value"] = arg;
+                    } else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) {
+                        char_json["value"] = core::base64_encode(arg);
                     } else {
                         char_json["value"] = nullptr;
                     }
@@ -339,7 +347,7 @@ Response AccessoryEndpoints::handle_put_characteristics(const Request& req, Conn
                 }
             }
         response["characteristics"] = final_chars;
-        Response resp{Status::OK};
+        Response resp{Status::MultiStatus};  // HAP Spec 6.7.3: WriteResponse uses 207 Multi-Status
         resp.set_header("Content-Type", "application/hap+json");
         resp.set_body(response.dump());
         return resp;

@@ -82,6 +82,7 @@ public:
     using ReadCallback = std::function<Value()>;
     using WriteCallback = std::function<void(const Value&)>;
     using EventCallback = std::function<void(const Value&, const EventSource&)>;
+    using WriteResponseCallback = std::function<std::optional<Value>(const Value&)>;
 
     Characteristic(uint64_t type, Format format, std::vector<Permission> permissions)
         : type_(type), format_(format), permissions_(std::move(permissions)) {}
@@ -139,6 +140,18 @@ public:
     void on_read(ReadCallback cb) { read_cb_ = std::move(cb); }
     void set_write_callback(WriteCallback callback) { write_callback_ = std::move(callback); }
     void set_event_callback(EventCallback callback) { event_callback_ = std::move(callback); }
+    void set_write_response_callback(WriteResponseCallback callback) { write_response_callback_ = std::move(callback); }
+    
+    /**
+     * @brief Handle write-with-response by invoking callback.
+     * @return Response value from callback, or nullopt if no callback set.
+     */
+    std::optional<Value> handle_write_response(const Value& input) {
+        if (write_response_callback_) {
+            return write_response_callback_(input);
+        }
+        return std::nullopt;
+    }
     
     void set_unit(std::string unit) { unit_ = std::move(unit); }
     void set_min_value(double min) { min_value_ = min; }
@@ -171,6 +184,7 @@ private:
     ReadCallback read_cb_;
     WriteCallback write_callback_;
     EventCallback event_callback_;
+    WriteResponseCallback write_response_callback_;
     
     std::optional<std::string> unit_;              // e.g., "celsius", "percentage"
     std::optional<double> min_value_;              // Minimum value

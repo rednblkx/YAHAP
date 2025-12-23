@@ -15,24 +15,6 @@ json to_json(const Characteristic& c);
 json to_json(const Service& s);
 json to_json(const Accessory& a);
 
-static std::string base64_encode(const std::vector<uint8_t>& data) {
-    static const char* encoding_table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string encoded;
-    encoded.reserve(((data.size() + 2) / 3) * 4);
-    
-    for (size_t i = 0; i < data.size(); i += 3) {
-        uint32_t val = (data[i] << 16);
-        if (i + 1 < data.size()) val |= (data[i + 1] << 8);
-        if (i + 2 < data.size()) val |= data[i + 2];
-        
-        encoded.push_back(encoding_table[(val >> 18) & 0x3F]);
-        encoded.push_back(encoding_table[(val >> 12) & 0x3F]);
-        encoded.push_back(i + 1 < data.size() ? encoding_table[(val >> 6) & 0x3F] : '=');
-        encoded.push_back(i + 2 < data.size() ? encoding_table[val & 0x3F] : '=');
-    }
-    return encoded;
-}
-
 json to_json(const Characteristic& c) {
     json j;
     
