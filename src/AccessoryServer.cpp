@@ -358,9 +358,7 @@ void AccessoryServer::reset_pairing_state() {
         iid_manager_->reset();
     }
     
-    // Clear any active TCP connections
-    impl_->connections.clear();
-    impl_->parsers.clear();
+    pending_connection_cleanup_ = true;
 }
 
 void AccessoryServer::factory_reset() {
@@ -528,6 +526,14 @@ void AccessoryServer::on_tcp_receive(uint32_t connection_id, std::span<const uin
                 "[AccessoryServer] Closing connection #" + std::to_string(connection_id) + " as requested");
             config_.network->tcp_disconnect(connection_id);
         }
+    }
+    
+    if (pending_connection_cleanup_) {
+        pending_connection_cleanup_ = false;
+        impl_->connections.clear();
+        impl_->parsers.clear();
+        config_.system->log(platform::System::LogLevel::Debug,
+            "[AccessoryServer] Deferred connection cleanup completed");
     }
 }
 

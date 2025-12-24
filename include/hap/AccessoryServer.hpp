@@ -111,6 +111,7 @@ private:
     Config config_;
     core::AttributeDatabase database_;
     bool mdns_registered_ = false;  // Track whether mDNS service has been registered
+    bool pending_connection_cleanup_ = false;
     
     // Router, scheduler, and endpoints (forward declared to reduce header dependencies)
     class Impl;
