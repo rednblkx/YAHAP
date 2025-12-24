@@ -117,8 +117,10 @@ std::vector<uint8_t> HTTPBuilder::build(const Response& response) {
         case Status::BadRequest: ss << " Bad Request"; break;
         case Status::Unauthorized: ss << " Unauthorized"; break;
         case Status::NotFound: ss << " Not Found"; break;
+        case Status::UnprocessableEntity: ss << " Unprocessable Entity"; break;
         case Status::MethodNotAllowed: ss << " Method Not Allowed"; break;
         case Status::InternalServerError: ss << " Internal Server Error"; break;
+        case Status::ServiceUnavailable: ss << " Service Unavailable"; break;
     }
     ss << "\r\n";
 

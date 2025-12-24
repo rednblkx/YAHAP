@@ -58,21 +58,25 @@ json to_json(const Characteristic& c) {
 
     // Value
     if (has_permission(c.permissions(), Permission::PairedRead)) {
-        auto value = c.get_value();
-        std::visit([&j](auto&& arg) {
-            using T = std::decay_t<decltype(arg)>;
-            if constexpr (std::is_same_v<T, bool>) {
-                j["value"] = arg;
-            } else if constexpr (std::is_same_v<T, uint8_t> || std::is_same_v<T, uint16_t> || 
-                                 std::is_same_v<T, uint32_t> || std::is_same_v<T, uint64_t> || 
-                                 std::is_same_v<T, int32_t> || std::is_same_v<T, float>) {
-                j["value"] = arg;
-            } else if constexpr (std::is_same_v<T, std::string>) {
-                j["value"] = arg;
-            } else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) {
-                j["value"] = base64_encode(arg);
-            }
-        }, value);
+        auto read_result = c.get_value();
+        // Only include value if read succeeded
+        if (std::holds_alternative<Value>(read_result)) {
+            auto value = std::get<Value>(read_result);
+            std::visit([&j](auto&& arg) {
+                using T = std::decay_t<decltype(arg)>;
+                if constexpr (std::is_same_v<T, bool>) {
+                    j["value"] = arg;
+                } else if constexpr (std::is_same_v<T, uint8_t> || std::is_same_v<T, uint16_t> || 
+                                     std::is_same_v<T, uint32_t> || std::is_same_v<T, uint64_t> || 
+                                     std::is_same_v<T, int32_t> || std::is_same_v<T, float>) {
+                    j["value"] = arg;
+                } else if constexpr (std::is_same_v<T, std::string>) {
+                    j["value"] = arg;
+                } else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) {
+                    j["value"] = base64_encode(arg);
+                }
+            }, value);
+        }
     }
     
     // Optional metadata (only include if set)

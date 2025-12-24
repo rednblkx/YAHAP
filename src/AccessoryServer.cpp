@@ -196,6 +196,21 @@ void AccessoryServer::setup_routes() {
         [this](const Request& req, ConnectionContext& ctx) {
             (void)req;
             (void)ctx;
+            
+            // HAP Spec 6.7.7: /identify is only valid if accessory is unpaired
+            auto pairing_list_data = config_.storage->get("pairing_list");
+            bool is_paired = pairing_list_data && pairing_list_data->size() > 2;
+            
+            if (is_paired) {
+                // Return 400 Bad Request with HAP status -70401 (InsufficientPrivileges)
+                nlohmann::json error_response;
+                error_response["status"] = core::to_int(core::HAPStatus::InsufficientPrivileges);
+                transport::Response resp{transport::Status::BadRequest};
+                resp.set_header("Content-Type", "application/hap+json");
+                resp.set_body(error_response.dump());
+                return resp;
+            }
+            
             if (config_.on_identify) {
                 config_.on_identify();
             }
@@ -495,8 +510,12 @@ void AccessoryServer::on_tcp_receive(uint32_t connection_id, std::span<const uin
         } else {
             config_.system->log(platform::System::LogLevel::Warning, 
                 "[AccessoryServer] No route found for: " + request.path);
+            // HAP Spec 6.7.1.4: 4xx responses must include HAP status code
+            nlohmann::json error_response;
+            error_response["status"] = core::to_int(core::HAPStatus::ResourceDoesNotExist);
             final_response = transport::Response{transport::Status::NotFound};
-            final_response.set_body("Not Found");
+            final_response.set_header("Content-Type", "application/hap+json");
+            final_response.set_body(error_response.dump());
         }
         
         // Build HTTP response

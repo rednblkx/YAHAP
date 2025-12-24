@@ -790,10 +790,18 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         else {
             auto ch = find_char_in_db(iid);
             if (ch) {
-                auto raw_value = core::CharacteristicSerializer::to_bytes(ch->get_value());
-                value_bytes.push_back(0x01); // Type: HAP-Param-Value
-                value_bytes.push_back(static_cast<uint8_t>(raw_value.size()));
-                value_bytes.insert(value_bytes.end(), raw_value.begin(), raw_value.end());
+                auto read_result = ch->get_value();
+                if (std::holds_alternative<core::HAPStatus>(read_result)) {
+                    // Read callback returned error
+                    status = 0x02; // HAP Error (map HAPStatus to BLE status)
+                    config_.system->log(platform::System::LogLevel::Warning, 
+                        "[BleTransport] Read IID=" + std::to_string(iid) + " callback returned error");
+                } else {
+                    auto raw_value = core::CharacteristicSerializer::to_bytes(std::get<core::Value>(read_result));
+                    value_bytes.push_back(0x01); // Type: HAP-Param-Value
+                    value_bytes.push_back(static_cast<uint8_t>(raw_value.size()));
+                    value_bytes.insert(value_bytes.end(), raw_value.begin(), raw_value.end());
+                }
             } else {
                 status = 0x05; // Invalid Request (Attribute Not Found)
                 config_.system->log(platform::System::LogLevel::Warning, "[BleTransport] Read IID=" + std::to_string(iid) + " Not Found");
@@ -945,17 +953,37 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                      // HAP Spec 7.3.5.5: Write-with-Response - return value if requested
                      if (return_response_requested && 
                          core::has_permission(ch->permissions(), core::Permission::WriteResponse)) {
-                         auto response_val = ch->handle_write_response(new_value);
-                         core::Value val_to_send = response_val.has_value() ? *response_val : ch->get_value();
+                         auto response_opt = ch->handle_write_response(new_value);
+                         core::Value val_to_send;
                          
-                         auto raw_bytes = core::CharacteristicSerializer::to_bytes(val_to_send);
-                         std::vector<core::TLV> resp_tlvs;
-                         resp_tlvs.emplace_back(0x01, raw_bytes); // HAP-Param-Value
-                         response_body = core::TLV8::encode(resp_tlvs);
+                         if (response_opt.has_value()) {
+                             auto& response = *response_opt;
+                             if (std::holds_alternative<core::HAPStatus>(response)) {
+                                 // WriteResponse callback returned error - still send status
+                                 status = 0x02; // HAP Error
+                                 config_.system->log(platform::System::LogLevel::Warning,
+                                     "[BleTransport] WriteResponse IID=" + std::to_string(iid) + " callback returned error");
+                             } else {
+                                 val_to_send = std::get<core::Value>(response);
+                             }
+                         } else {
+                             // No callback, use current value
+                             auto read_result = ch->get_value();
+                             if (std::holds_alternative<core::Value>(read_result)) {
+                                 val_to_send = std::get<core::Value>(read_result);
+                             }
+                         }
                          
-                         config_.system->log(platform::System::LogLevel::Info, 
-                             "[BleTransport] Write-Response IID=" + std::to_string(iid) + 
-                             " returning " + std::to_string(response_body.size()) + " bytes");
+                         if (status == 0x00) {
+                             auto raw_bytes = core::CharacteristicSerializer::to_bytes(val_to_send);
+                             std::vector<core::TLV> resp_tlvs;
+                             resp_tlvs.emplace_back(0x01, raw_bytes); // HAP-Param-Value
+                             response_body = core::TLV8::encode(resp_tlvs);
+                             
+                             config_.system->log(platform::System::LogLevel::Info, 
+                                 "[BleTransport] Write-Response IID=" + std::to_string(iid) + 
+                                 " returning " + std::to_string(response_body.size()) + " bytes");
+                         }
                      }
                      
                      // Get actual AID for this characteristic

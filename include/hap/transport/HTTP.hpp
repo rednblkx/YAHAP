@@ -23,8 +23,10 @@ enum class Status {
     BadRequest = 400,
     Unauthorized = 401,
     NotFound = 404,
+    UnprocessableEntity = 422,
     MethodNotAllowed = 405,
-    InternalServerError = 500
+    InternalServerError = 500,
+    ServiceUnavailable = 503
 };
 
 using Headers = std::map<std::string, std::string>;

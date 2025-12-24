@@ -72,6 +72,7 @@ Response AccessoryEndpoints::handle_get_characteristics(const Request& req, Conn
     
     json response;
     json characteristics = json::array();
+    bool any_error = false;
     
     for (const auto& [aid, iid] : char_ids) {
         auto characteristic = database_->find_characteristic(aid, iid);
@@ -82,11 +83,26 @@ Response AccessoryEndpoints::handle_get_characteristics(const Request& req, Conn
             
             if (!core::has_permission(characteristic->permissions(), core::Permission::PairedRead)) {
                 char_json["status"] = core::to_int(core::HAPStatus::WriteOnlyCharacteristic);
+                any_error = true;
                 characteristics.push_back(char_json);
                 continue;
             }
             
-            auto value = characteristic->get_value();
+            // get_value() now returns ReadResponse (variant of Value or HAPStatus)
+            auto read_result = characteristic->get_value();
+            
+            if (std::holds_alternative<core::HAPStatus>(read_result)) {
+                // Read callback returned an error status
+                char_json["status"] = core::to_int(std::get<core::HAPStatus>(read_result));
+                any_error = true;
+                characteristics.push_back(char_json);
+                continue;
+            }
+            
+            // Success - extract the Value
+            auto value = std::get<core::Value>(read_result);
+            char_json["status"] = core::to_int(core::HAPStatus::Success);
+            
             std::visit([&char_json](auto&& arg) {
                 using T = std::decay_t<decltype(arg)>;
                 if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, uint8_t> || 
@@ -105,10 +121,27 @@ Response AccessoryEndpoints::handle_get_characteristics(const Request& req, Conn
             char_json["aid"] = aid;
             char_json["iid"] = iid;
             char_json["status"] = core::to_int(core::HAPStatus::ResourceDoesNotExist);
+            any_error = true;
             characteristics.push_back(char_json);
         }
     }
     
+    response["characteristics"] = characteristics;
+    
+    // HAP Spec 6.7.4.2: Return 207 Multi-Status if any read fails
+    if (any_error) {
+        Response resp{Status::MultiStatus};
+        resp.set_header("Content-Type", "application/hap+json");
+        resp.set_body(response.dump());
+        return resp;
+    }
+    
+    // For 200 OK, strip status:0 as it's optional for successful reads
+    for (auto& c : characteristics) {
+        if (c.contains("status") && c["status"] == 0) {
+            c.erase("status");
+        }
+    }
     response["characteristics"] = characteristics;
     
     Response resp{Status::OK};
@@ -123,14 +156,20 @@ Response AccessoryEndpoints::handle_put_characteristics(const Request& req, Conn
     std::string body_str(req.body.begin(), req.body.end());
     auto body_json = json::parse(body_str, nullptr, false);
     if (body_json.is_discarded()) {
+            json error_response;
+            error_response["status"] = core::to_int(core::HAPStatus::InvalidValueInRequest);
             Response resp{Status::BadRequest};
-            resp.set_body("Invalid JSON");
+            resp.set_header("Content-Type", "application/hap+json");
+            resp.set_body(error_response.dump());
             return resp;
     }
     
     if (!body_json.contains("characteristics") || !body_json["characteristics"].is_array()) {
+        json error_response;
+        error_response["status"] = core::to_int(core::HAPStatus::InvalidValueInRequest);
         Response resp{Status::BadRequest};
-        resp.set_body("Invalid request");
+        resp.set_header("Content-Type", "application/hap+json");
+        resp.set_body(error_response.dump());
         return resp;
     }
     
@@ -303,26 +342,45 @@ Response AccessoryEndpoints::handle_put_characteristics(const Request& req, Conn
             
             if (status == core::to_int(core::HAPStatus::Success) && 
                 core::has_permission(characteristic->permissions(), core::Permission::WriteResponse)) {
-                core::Value value;
-                auto response_val = characteristic->handle_write_response(characteristic->get_value());
-                if (response_val.has_value()) {
-                    value = *response_val;
-                } else {
-                    value = characteristic->get_value();
-                }
-                std::visit([&char_json](auto&& arg) {
-                    using T = std::decay_t<decltype(arg)>;
-                    if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, uint8_t> || 
-                                    std::is_same_v<T, uint16_t> || std::is_same_v<T, uint32_t> || 
-                                    std::is_same_v<T, uint64_t> || std::is_same_v<T, int32_t> || 
-                                    std::is_same_v<T, float> || std::is_same_v<T, std::string>) {
-                        char_json["value"] = arg;
-                    } else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) {
-                        char_json["value"] = core::base64_encode(arg);
+                // Get input value for write-response callback
+                auto read_result = characteristic->get_value();
+                if (std::holds_alternative<core::Value>(read_result)) {
+                    auto input_value = std::get<core::Value>(read_result);
+                    auto response_opt = characteristic->handle_write_response(input_value);
+                    
+                    core::Value value_to_send;
+                    if (response_opt.has_value()) {
+                        auto& response = *response_opt;
+                        if (std::holds_alternative<core::HAPStatus>(response)) {
+                            // WriteResponse callback returned an error
+                            status = core::to_int(std::get<core::HAPStatus>(response));
+                            any_error = true;
+                        } else {
+                            value_to_send = std::get<core::Value>(response);
+                        }
                     } else {
-                        char_json["value"] = nullptr;
+                        // No callback, use the current value
+                        value_to_send = input_value;
                     }
-                }, value);
+                    
+                    if (status == core::to_int(core::HAPStatus::Success)) {
+                        std::visit([&char_json](auto&& arg) {
+                            using T = std::decay_t<decltype(arg)>;
+                            if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, uint8_t> || 
+                                            std::is_same_v<T, uint16_t> || std::is_same_v<T, uint32_t> || 
+                                            std::is_same_v<T, uint64_t> || std::is_same_v<T, int32_t> || 
+                                            std::is_same_v<T, float> || std::is_same_v<T, std::string>) {
+                                char_json["value"] = arg;
+                            } else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) {
+                                char_json["value"] = core::base64_encode(arg);
+                            } else {
+                                char_json["value"] = nullptr;
+                            }
+                        }, value_to_send);
+                    }
+                    // Update the status in char_json in case it changed
+                    char_json["status"] = status;
+                }
             }
             
             characteristics.push_back(char_json);
@@ -339,9 +397,10 @@ Response AccessoryEndpoints::handle_put_characteristics(const Request& req, Conn
         json final_chars = json::array();
             for (auto& c : characteristics) {
                 if (c.contains("value")) {
-                    // Omit status if 0 for 200 OK
-                    if (c.contains("status") && c["status"] == 0) {
-                        c.erase("status");
+                    // HAP Spec 6.7.3: 207 Multi-Status MUST include status for each characteristic
+                    // Ensure status is present (default to 0 if not set)
+                    if (!c.contains("status")) {
+                        c["status"] = core::to_int(core::HAPStatus::Success);
                     }
                     final_chars.push_back(c);
                 }
@@ -385,8 +444,11 @@ Response AccessoryEndpoints::handle_prepare(const Request& req, ConnectionContex
     auto body_json = json::parse(body_str, nullptr, false);
 
     if (body_json.is_discarded()) {
+            json error_response;
+            error_response["status"] = core::to_int(core::HAPStatus::InvalidValueInRequest);
             Response resp{Status::BadRequest};
-            resp.set_body("Invalid JSON");
+            resp.set_header("Content-Type", "application/hap+json");
+            resp.set_body(error_response.dump());
             return resp;
     }
 
@@ -404,8 +466,11 @@ Response AccessoryEndpoints::handle_prepare(const Request& req, ConnectionContex
         resp.set_body(response.dump());
         return resp;
     } else {
+        json error_response;
+        error_response["status"] = core::to_int(core::HAPStatus::InvalidValueInRequest);
         Response resp{Status::BadRequest};
-        resp.set_body("Missing ttl or pid");
+        resp.set_header("Content-Type", "application/hap+json");
+        resp.set_body(error_response.dump());
         return resp;
     }
 }

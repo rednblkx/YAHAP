@@ -10,6 +10,20 @@
 
 namespace hap::core {
 
+// Forward declaration - full definition in HAPStatus.hpp
+enum class HAPStatus : int32_t;
+
+/**
+ * @brief Response type for characteristic read/write operations.
+ * 
+ * Can hold either a successful value or an HAP status code indicating failure.
+ * Per HAP Spec 6.7.2.3 and 6.7.4.2, characteristic operations can fail with
+ * status codes like -70402 (ServiceCommunicationFailure) when physical devices
+ * are unreachable.
+ */
+template<typename T>
+using HAPResponse = std::variant<T, HAPStatus>;
+
 /**
  * @brief Source of a characteristic event/write
  */
@@ -74,15 +88,41 @@ using Value = std::variant<
     std::vector<uint8_t>
 >;
 
+/// Result of reading a characteristic - either a Value or an error status
+using ReadResponse = HAPResponse<Value>;
+
+/// Result of writing a characteristic - nullopt means success, HAPStatus means failure
+using WriteResponse = std::optional<HAPStatus>;
+
 /**
  * @brief HAP Characteristic
  */
 class Characteristic {
 public:
-    using ReadCallback = std::function<Value()>;
-    using WriteCallback = std::function<void(const Value&)>;
+    /**
+     * @brief Callback for reading characteristic values.
+     * 
+     * Can return either a Value (success) or an HAPStatus error code.
+     * Example: return HAPStatus::ServiceCommunicationFailure when device is unreachable.
+     */
+    using ReadCallback = std::function<ReadResponse()>;
+    
+    /**
+     * @brief Callback for writing characteristic values.
+     * 
+     * Returns nullopt for success, or an HAPStatus error code for failure.
+     */
+    using WriteCallback = std::function<WriteResponse(const Value&)>;
+    
     using EventCallback = std::function<void(const Value&, const EventSource&)>;
-    using WriteResponseCallback = std::function<std::optional<Value>(const Value&)>;
+    
+    /**
+     * @brief Callback for write-with-response operations.
+     * 
+     * Can return either a Value (success) or an HAPStatus error code.
+     * Per HAP Spec 6.7.3, used for control point characteristics.
+     */
+    using WriteResponseCallback = std::function<HAPResponse<Value>(const Value&)>;
 
     Characteristic(uint64_t type, Format format, std::vector<Permission> permissions)
         : type_(type), format_(format), permissions_(std::move(permissions)) {}
@@ -114,15 +154,27 @@ public:
         dispatcher_ = std::move(dispatcher);
     }
     
-    void set_value(Value value, EventSource source = {}) {
+    /**
+     * @brief Set the characteristic value.
+     * @param value The new value to set.
+     * @param source The source of the write (e.g., connection ID).
+     * @return nullopt on success, or HAPStatus error code on failure.
+     */
+    WriteResponse set_value(Value value, EventSource source = {}) {
         value_ = coerce_value(std::move(value));
+        
+        WriteResponse result = std::nullopt; // Success by default
+        
+        if (write_callback_ && source.type == EventSource::Type::Connection) {
+            // Synchronous callback - captures result
+            result = write_callback_(value_);
+            if (result.has_value()) {
+                return result; // Return error immediately
+            }
+        }
         
         if (dispatcher_) {
             Value captured_value = value_;
-            if (write_callback_ && source.type == EventSource::Type::Connection) {
-                auto cb = write_callback_;
-                dispatcher_([cb, captured_value]() { cb(captured_value); });
-            }
             if (event_callback_ && source.type != EventSource::Type::Connection) {
                 auto cb = event_callback_;
                 dispatcher_([cb, captured_value, source]() { cb(captured_value, source); });
@@ -130,10 +182,24 @@ public:
         } else {
             if (event_callback_) event_callback_(value_, source);
         }
+        
+        return result;
     }
 
-    Value get_value() const {
-        if (read_cb_) return coerce_value(read_cb_());
+    /**
+     * @brief Get the characteristic value.
+     * @return Value on success, or HAPStatus error code if read callback fails.
+     */
+    ReadResponse get_value() const {
+        if (read_cb_) {
+            auto result = read_cb_();
+            // If callback returned a Value, coerce it
+            if (std::holds_alternative<Value>(result)) {
+                return coerce_value(std::get<Value>(result));
+            }
+            // Otherwise return the error status as-is
+            return result;
+        }
         return value_;
     }
 
@@ -144,9 +210,9 @@ public:
     
     /**
      * @brief Handle write-with-response by invoking callback.
-     * @return Response value from callback, or nullopt if no callback set.
+     * @return Response from callback (Value or HAPStatus), or nullopt if no callback set.
      */
-    std::optional<Value> handle_write_response(const Value& input) {
+    std::optional<HAPResponse<Value>> handle_write_response(const Value& input) {
         if (write_response_callback_) {
             return write_response_callback_(input);
         }
