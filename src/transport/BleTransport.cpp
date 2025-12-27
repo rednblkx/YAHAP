@@ -1492,6 +1492,7 @@ std::vector<uint8_t> BleTransport::process_signature_read(uint16_t connection_id
                                  else if (p == core::Permission::TimedWrite) props |= 0x0008;
                                  else if (p == core::Permission::Hidden) props |= 0x0040;
                                  else if (p == core::Permission::AdditionalAuthorization) props |= 0x0004;
+                                 else if (p == core::Permission::Broadcast) props |= 0x0200;
                              }
                              
                              BleTlvBuilder builder;
@@ -1696,6 +1697,9 @@ void BleTransport::handle_characteristic_change(uint64_t aid, uint64_t iid,
         if (perm == core::Permission::Notify) {
             supports_connected = true;
             supports_disconnected = true;
+        }
+        if (perm == core::Permission::Broadcast) {
+            supports_broadcast = true;
         }
     }
     

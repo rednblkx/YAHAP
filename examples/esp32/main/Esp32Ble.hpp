@@ -23,6 +23,9 @@ public:
                                   uint32_t fast_interval_ms,
                                   uint32_t fast_duration_ms,
                                   uint32_t normal_interval_ms) override;
+    void start_encrypted_advertising(const EncryptedAdvertisement& data,
+                                      uint32_t interval_ms,
+                                      uint32_t duration_ms) override;
     void start() override;
 
 private:
@@ -57,5 +60,9 @@ private:
     Advertisement timed_adv_data_;
     uint32_t normal_interval_ms_ = 1000;
     static void adv_timer_callback(void* arg);
+    
+    // Encrypted advertising state (for HAP Spec 7.4.6.2 Broadcasted Events)
+    esp_timer_handle_t enc_adv_timer_ = nullptr;
+    bool encrypted_adv_active_ = false;
+    static void enc_adv_timer_callback(void* arg);
 };
-

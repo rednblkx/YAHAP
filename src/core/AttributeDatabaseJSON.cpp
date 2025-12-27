@@ -38,6 +38,7 @@ json to_json(const Characteristic& c) {
             case Permission::TimedWrite: perms.push_back("tw"); break;
             case Permission::Hidden: perms.push_back("hd"); break;
             case Permission::WriteResponse: perms.push_back("wr"); break;
+            case Permission::Broadcast: break; // BLE-only property, not in HAP JSON spec
         }
     }
     j["perms"] = perms;

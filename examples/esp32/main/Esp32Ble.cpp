@@ -1,7 +1,14 @@
+#include <esp_log.h>
+#include <esp_err.h>
+#include <vector>
+#include <cstring>
+#include <cstdlib>
+#include <optional>
+#include <string>
+
 #include "Esp32Ble.hpp"
 #include "esp_log_buffer.h"
 #include "esp_random.h"
-#include <esp_log.h>
 #if CONFIG_IDF_TARGET_ESP32
 #include <esp_nimble_hci.h>
 #endif
@@ -13,7 +20,6 @@
 #include <cstdlib>
 #include <optional>
 #include <string>
-#include <vector>
 
 static const char* TAG = "Esp32Ble";
 
@@ -307,6 +313,116 @@ void Esp32Ble::start_timed_advertising(const Advertisement& data,
     }
 }
 
+void Esp32Ble::enc_adv_timer_callback(void* arg) {
+    auto* self = static_cast<Esp32Ble*>(arg);
+    ESP_LOGI(TAG, "Encrypted advertising duration complete, falling back to regular advertising");
+    
+    self->encrypted_adv_active_ = false;
+    
+    if (last_adv.has_value()) {
+        self->start_advertising(*last_adv, last_adv_interval);
+    }
+}
+
+void Esp32Ble::start_encrypted_advertising(const EncryptedAdvertisement& data,
+                                            uint32_t interval_ms,
+                                            uint32_t duration_ms) {
+    if (!nimble_synced) {
+        ESP_LOGW(TAG, "Stack not synced, cannot start encrypted advertising");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Starting encrypted advertising: interval=%lums duration=%lums GSN=%u",
+             (unsigned long)interval_ms, (unsigned long)duration_ms, data.gsn);
+    
+    ble_gap_adv_stop();
+    
+    if (enc_adv_timer_ != nullptr) {
+        esp_timer_stop(enc_adv_timer_);
+        esp_timer_delete(enc_adv_timer_);
+        enc_adv_timer_ = nullptr;
+    }
+    
+    encrypted_adv_active_ = true;
+    
+    // Build HAP encrypted advertisement format per HAP Spec 7.4.2.2.2 Table 7-46:
+    // - Type: 0x11 (HAP Encrypted Notification)
+    // - STL: 0x36 (SubType=1 for encrypted notification, Length=22 bytes) per Table 7-48
+    // - Advertising ID: 6 bytes
+    // - Encrypted Payload: 16 bytes (12 ciphertext + 4 truncated auth tag)
+    std::vector<uint8_t> mfg_payload;
+    mfg_payload.push_back(0x11);  // Type: HAP Encrypted Notification
+    mfg_payload.push_back(0x36);  // STL: SubType=1 (encrypted), Length=22 (0x16)
+    // Advertising ID (6 bytes)
+    mfg_payload.insert(mfg_payload.end(), 
+                       data.advertising_id.begin(), 
+                       data.advertising_id.end());
+    // Encrypted payload (16 bytes: 12 ciphertext + 4 auth tag)
+    mfg_payload.insert(mfg_payload.end(),
+                       data.encrypted_payload.begin(),
+                       data.encrypted_payload.end());
+    
+    ESP_LOGI(TAG, "Encrypted adv payload: %d bytes", (int)mfg_payload.size());
+    ESP_LOG_BUFFER_HEX_LEVEL(TAG, mfg_payload.data(), mfg_payload.size(), ESP_LOG_DEBUG);
+    
+    std::vector<uint8_t> full_mfg_data;
+    full_mfg_data.push_back(0x4C);
+    full_mfg_data.push_back(0x00);
+    full_mfg_data.insert(full_mfg_data.end(), mfg_payload.begin(), mfg_payload.end());
+    
+    struct ble_gap_adv_params adv_params;
+    struct ble_hs_adv_fields adv_fields;
+    
+    memset(&adv_params, 0, sizeof(adv_params));
+    memset(&adv_fields, 0, sizeof(adv_fields));
+    
+    adv_fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
+    adv_fields.mfg_data = full_mfg_data.data();
+    adv_fields.mfg_data_len = full_mfg_data.size();
+    
+    int rc = ble_gap_adv_set_fields(&adv_fields);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "Error setting encrypted adv fields: rc=%d", rc);
+        encrypted_adv_active_ = false;
+        return;
+    }
+    
+    adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
+    adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
+    adv_params.itvl_min = BLE_GAP_ADV_ITVL_MS(interval_ms);
+    adv_params.itvl_max = BLE_GAP_ADV_ITVL_MS(interval_ms);
+    
+    rc = ble_gap_adv_start(BLE_OWN_ADDR_RANDOM, NULL, BLE_HS_FOREVER, &adv_params, ble_gap_event, this);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "Error starting encrypted advertising: rc=%d", rc);
+        encrypted_adv_active_ = false;
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Encrypted advertising started");
+    
+    esp_timer_create_args_t timer_args = {
+        .callback = enc_adv_timer_callback,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "enc_adv_timer",
+        .skip_unhandled_events = true,
+    };
+    
+    esp_err_t err = esp_timer_create(&timer_args, &enc_adv_timer_);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create encrypted adv timer: %s", esp_err_to_name(err));
+        return;
+    }
+    
+    err = esp_timer_start_once(enc_adv_timer_, duration_ms * 1000);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start encrypted adv timer: %s", esp_err_to_name(err));
+        esp_timer_delete(enc_adv_timer_);
+        enc_adv_timer_ = nullptr;
+    }
+}
+
 bool Esp32Ble::send_indication(uint16_t connection_id, const std::string& characteristic_uuid, std::span<const uint8_t> data) {
     uint16_t attr_handle = 0;
     
@@ -479,6 +595,18 @@ int Esp32Ble::ble_gap_event(struct ble_gap_event *event, void *arg) {
     switch (event->type) {
         case BLE_GAP_EVENT_CONNECT:
             ESP_LOGI(TAG, "Connected");
+            {
+                auto self = static_cast<Esp32Ble*>(arg);
+                if (self && self->encrypted_adv_active_) {
+                    ESP_LOGI(TAG, "Connection during encrypted advertising - aborting broadcast");
+                    self->encrypted_adv_active_ = false;
+                    if (self->enc_adv_timer_ != nullptr) {
+                        esp_timer_stop(self->enc_adv_timer_);
+                        esp_timer_delete(self->enc_adv_timer_);
+                        self->enc_adv_timer_ = nullptr;
+                    }
+                }
+            }
             break;
         case BLE_GAP_EVENT_DISCONNECT:
             ESP_LOGI(TAG, "Disconnected, reason=0x%x", event->disconnect.reason);

@@ -18,9 +18,9 @@ using namespace hap::core;
 //==============================================================================
 #define PERM_PR     std::vector{Permission::PairedRead}
 #define PERM_PW     std::vector{Permission::PairedWrite}
-#define PERM_PR_NT  std::vector{Permission::PairedRead, Permission::Notify}
+#define PERM_PR_NT  std::vector{Permission::PairedRead, Permission::Notify, Permission::Broadcast}
 #define PERM_PR_PW  std::vector{Permission::PairedRead, Permission::PairedWrite}
-#define PERM_PR_PW_NT std::vector{Permission::PairedRead, Permission::PairedWrite, Permission::Notify}
+#define PERM_PR_PW_NT std::vector{Permission::PairedRead, Permission::PairedWrite, Permission::Notify, Permission::Broadcast}
 #define PERM_PR_PW_WR std::vector{Permission::PairedRead, Permission::PairedWrite, Permission::WriteResponse}
 
 //==============================================================================

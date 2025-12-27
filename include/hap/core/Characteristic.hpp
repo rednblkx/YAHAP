@@ -70,7 +70,8 @@ enum class Permission {
     AdditionalAuthorization,
     TimedWrite,
     Hidden,
-    WriteResponse
+    WriteResponse,
+    Broadcast
 };
 
 /**
