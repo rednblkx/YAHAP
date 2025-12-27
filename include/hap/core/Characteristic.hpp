@@ -29,11 +29,12 @@ using HAPResponse = std::variant<T, HAPStatus>;
  */
 struct EventSource {
     enum class Type {
-        None,
+        NotifyChange,
+        Internal,
         Connection
     };
 
-    Type type = Type::None;
+    Type type = Type::NotifyChange;
     uint32_t id = 0;
 
     static EventSource from_connection(uint32_t conn_id) {
@@ -176,12 +177,12 @@ public:
         
         if (dispatcher_) {
             Value captured_value = value_;
-            if (event_callback_ && source.type != EventSource::Type::Connection) {
+            if (event_callback_ && source.type == EventSource::Type::NotifyChange) {
                 auto cb = event_callback_;
                 dispatcher_([cb, captured_value, source]() { cb(captured_value, source); });
             }
         } else {
-            if (event_callback_) event_callback_(value_, source);
+            if (event_callback_ && source.type == EventSource::Type::NotifyChange) event_callback_(value_, source);
         }
         
         return result;
