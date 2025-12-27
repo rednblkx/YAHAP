@@ -1707,7 +1707,6 @@ void BleTransport::handle_characteristic_change(uint64_t aid, uint64_t iid,
     if (broadcast_configs_.count(static_cast<uint16_t>(iid))) {
         auto& bc = broadcast_configs_[static_cast<uint16_t>(iid)];
         broadcast_enabled = bc.enabled;
-        supports_broadcast = bc.enabled;
     }
     
     auto it = instance_map_.find({aid, iid});
