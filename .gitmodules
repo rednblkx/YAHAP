@@ -1,0 +1,3 @@
+[submodule "examples/esp32/components/yahap-pal"]
+	path = examples/esp32/components/yahap-pal
+	url = https://github.com/rednblkx/esp32-yahap-pal.git

@@ -5,10 +5,10 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
-#include "Esp32Platform.hpp"
-#include "Esp32Crypto.hpp"
 #include "Esp32Ble.hpp"
-
+#include "Esp32Crypto.hpp"
+#include "Esp32Platform.hpp"
+#include "Esp32Storage.hpp"
 #include "hap/AccessoryServer.hpp"
 #include "hap/transport/BleTransport.hpp"
 #include "hap/core/Accessory.hpp"

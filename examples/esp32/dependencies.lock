@@ -9,6 +9,16 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.0.20~2
+  espressif/mdns:
+    component_hash: 29e47564b1a7ee778135e17fbbf2a2773f71c97ebabfe626c8eda7c958a7ad16
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.9.1
   idf:
     source:
       type: idf
@@ -25,8 +35,9 @@ dependencies:
     version: 3.12.0
 direct_dependencies:
 - espressif/libsodium
+- espressif/mdns
 - idf
 - johboh/nlohmann-json
-manifest_hash: c6d01e6ced59a5cdd558c4c03125237e85ad1316cc75d12b4e61d235bef25e56
+manifest_hash: 4ee3dbf34b1b8cf07a60ad0ae0bd62688914e54bebce02e718af4d2e4d11adb4
 target: esp32c6
 version: 2.0.0
