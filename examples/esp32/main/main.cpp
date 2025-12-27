@@ -38,7 +38,7 @@ extern "C" void app_main() {
     static Esp32System system_impl;
     static Esp32Storage storage_impl;
     static Esp32Crypto crypto_impl;
-    static Esp32Ble ble_impl;
+    static Esp32Ble ble_impl(&storage_impl);
 
     hap::AccessoryServer::Config config;
     config.system = &system_impl;

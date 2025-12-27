@@ -1,7 +1,7 @@
 #include "Esp32Ble.hpp"
 #include "esp_log_buffer.h"
+#include "esp_random.h"
 #include <esp_log.h>
-#include <esp_bt.h>
 #if CONFIG_IDF_TARGET_ESP32
 #include <esp_nimble_hci.h>
 #endif
@@ -12,8 +12,16 @@
 #include <cstring>
 #include <cstdlib>
 #include <optional>
+#include <string>
+#include <vector>
 
 static const char* TAG = "Esp32Ble";
+
+// Storage keys for BLE address persistence
+static const char* KEY_BLE_ADDR = "ble_addr";
+static const char* KEY_BLE_ADDR_CN = "ble_addr_cn";
+
+static hap::platform::Storage* g_storage = nullptr;
 
 // definition of static member
 std::vector<Esp32Ble::CharacteristicContext*> Esp32Ble::all_contexts;
@@ -24,6 +32,49 @@ static std::optional<Esp32Ble::Advertisement> pending_adv;
 static std::optional<Esp32Ble::Advertisement> last_adv;
 static uint32_t pending_adv_interval = 0;
 static uint32_t last_adv_interval = 20;
+
+static bool load_stored_address(uint8_t addr[6], uint8_t* stored_cn) {
+    if (!g_storage) return false;
+    
+    auto addr_data = g_storage->get(KEY_BLE_ADDR);
+    auto cn_data = g_storage->get(KEY_BLE_ADDR_CN);
+    
+    if (!addr_data || addr_data->size() != 6 || !cn_data || cn_data->empty()) {
+        return false;
+    }
+    
+    memcpy(addr, addr_data->data(), 6);
+    *stored_cn = (uint8_t)atoi(std::string(cn_data->begin(), cn_data->end()).c_str());
+    return true;
+}
+
+static void save_address(const uint8_t addr[6], uint8_t cn) {
+    if (!g_storage) {
+        ESP_LOGE(TAG, "No storage interface available");
+        return;
+    }
+    
+    std::vector<uint8_t> addr_vec(addr, addr + 6);
+    std::string cn_str = std::to_string(cn);
+    std::vector<uint8_t> cn_vec(cn_str.begin(), cn_str.end());
+    
+    g_storage->set(KEY_BLE_ADDR, addr_vec);
+    g_storage->set(KEY_BLE_ADDR_CN, cn_vec);
+    ESP_LOGI(TAG, "Saved BLE address for CN=%d", cn);
+}
+
+static uint8_t get_current_cn() {
+    if (!g_storage) return 1;
+    
+    auto cn_data = g_storage->get("config_number");
+    if (cn_data && !cn_data->empty()) {
+        std::string cn_str(cn_data->begin(), cn_data->end());
+        uint8_t cn = (uint8_t)atoi(cn_str.c_str());
+        ESP_LOGI(TAG, "Read CN=%d from storage", cn);
+        return cn;
+    }
+    return 1;
+}
 
 static void parse_uuid(const std::string& uuid_str, ble_uuid_any_t* uuid) {
     ESP_LOGD(TAG, "Parsing UUID: %s", uuid_str.c_str());
@@ -47,17 +98,52 @@ static void parse_uuid(const std::string& uuid_str, ble_uuid_any_t* uuid) {
     }
 }
 
-Esp32Ble::Esp32Ble() {
+Esp32Ble::Esp32Ble(hap::platform::Storage* storage) : storage_(storage) {
 #if CONFIG_IDF_TARGET_ESP32
     ESP_ERROR_CHECK(esp_nimble_hci_init());
 #endif
     nimble_port_init();
     
+    g_storage = storage;
     g_ble_instance = this;
 
     ble_hs_cfg.sync_cb = [](){
         ESP_LOGI(TAG, "NimBLE Synced");
         nimble_synced = true;
+        
+        uint8_t random_addr[6];
+        uint8_t stored_cn = 0;
+        uint8_t current_cn = get_current_cn();
+        bool need_new_address = true;
+        
+        if (load_stored_address(random_addr, &stored_cn)) {
+            if (stored_cn == current_cn) {
+                ESP_LOGI(TAG, "Reusing stored address for CN=%d", current_cn);
+                need_new_address = false;
+            } else {
+                ESP_LOGI(TAG, "CN changed (%d -> %d), generating new address", stored_cn, current_cn);
+            }
+        } else {
+            ESP_LOGI(TAG, "No stored address or regen requested, generating new address");
+        }
+        
+        if (need_new_address) {
+            for (int i = 0; i < 6; ++i) {
+                random_addr[i] = (uint8_t)esp_random();
+            }
+            random_addr[5] |= 0xC0;
+            save_address(random_addr, current_cn);
+        }
+        
+        int rc = ble_hs_id_set_rnd(random_addr);
+        if (rc != 0) {
+            ESP_LOGE(TAG, "Failed to set random address: %d", rc);
+        } else {
+            ESP_LOGI(TAG, "Set random address: %02X:%02X:%02X:%02X:%02X:%02X",
+                     random_addr[5], random_addr[4], random_addr[3],
+                     random_addr[2], random_addr[1], random_addr[0]);
+        }
+        
         if (pending_adv && g_ble_instance) {
              g_ble_instance->start_advertising(*pending_adv, pending_adv_interval);
              pending_adv.reset();
@@ -97,6 +183,8 @@ void Esp32Ble::start_advertising(const Advertisement& data, uint32_t interval_ms
         pending_adv_interval = interval_ms;
         return;
     }
+
+    ble_gap_adv_stop();
 
     struct ble_gap_adv_params adv_params;
     struct ble_hs_adv_fields adv_fields;
@@ -143,9 +231,7 @@ void Esp32Ble::start_advertising(const Advertisement& data, uint32_t interval_ms
     adv_params.itvl_min = BLE_GAP_ADV_ITVL_MS(interval_ms);
     adv_params.itvl_max = BLE_GAP_ADV_ITVL_MS(interval_ms);
     
-    ble_gap_adv_stop();
-    
-    rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER, &adv_params, ble_gap_event, this);
+    rc = ble_gap_adv_start(BLE_OWN_ADDR_RANDOM, NULL, BLE_HS_FOREVER, &adv_params, ble_gap_event, this);
     if (rc != 0) {
         ESP_LOGE(TAG, "error enabling advertisement; rc=%d", rc);
     } else {
