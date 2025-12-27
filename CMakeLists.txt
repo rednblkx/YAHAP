@@ -7,16 +7,13 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_BUILD_TYPE "MinSizeRel" CACHE STRING "Build type")
 
-# Library target
 add_library(hap)
 
-# Include directories
 target_include_directories(hap PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
 
-# Dependencies
 include(FetchContent)
 FetchContent_Declare(
     json
@@ -28,7 +25,6 @@ FetchContent_MakeAvailable(json)
 target_link_libraries(hap PRIVATE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
 target_compile_definitions(hap PRIVATE JSON_NOEXCEPTION)
 
-# Source files (will be populated as we add them)
 target_sources(hap PRIVATE
     src/AccessoryServer.cpp
     src/common/TaskScheduler.cpp
@@ -54,14 +50,12 @@ target_sources(hap PRIVATE
     src/types/ServiceTypes.cpp
 )
 
-# Compiler warnings (High quality code)
 if(MSVC)
     target_compile_options(hap PRIVATE /W4 /WX)
 else()
     target_compile_options(hap PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
 
-# Testing (only if standalone build)
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     include(CTest)
     if(BUILD_TESTING)
