@@ -29,7 +29,6 @@ private:
     void accept_loop(uint16_t port);
     void client_handler(int client_fd, uint32_t connection_id);
     
-    // Avahi
     static void client_callback(AvahiClient *c, AvahiClientState state, void *userdata);
     static void entry_group_callback(AvahiEntryGroup *g, AvahiEntryGroupState state, void *userdata);
     void create_services(AvahiClient *c);
@@ -39,26 +38,14 @@ private:
     AvahiEntryGroup* group_ = nullptr;
     std::string name_;
     uint16_t port_ = 0;
-    // We need to store TXT records to update them
-    // For simplicity, we'll just store the last service info
     hap::platform::Network::MdnsService current_service_;
+    std::atomic<bool> poll_running_{false};
 
     hap::platform::Network::ReceiveCallback receive_callback_;
     hap::platform::Network::DisconnectCallback disconnect_callback_;
     
     std::atomic<bool> running_{false};
     std::thread accept_thread_;
-    std::vector<std::thread> client_threads_;
-    
-    // Simple mapping of connection ID to socket FD
-    // In a real app, use a proper map with mutex
-    struct Connection {
-        uint32_t id;
-        int fd;
-        std::atomic<bool> active;
-    };
-    // For this simple example, we might just leak threads or detach them
-    // But let's try to be slightly better
 };
 
 } // namespace linux_pal

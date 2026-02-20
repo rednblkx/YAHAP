@@ -21,6 +21,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Add the main HAP library
 add_subdirectory(../.. hap)
 
+# Add the HK-HomeKit library
+add_subdirectory(components/HK-HomeKit-Lib)
+
 # Example executable
 add_executable(hap_lightbulb_example
     src/main.cpp
@@ -41,6 +44,7 @@ target_link_libraries(hap_lightbulb_example PRIVATE
     simplesrp
     avahi-client
     avahi-common
+    HK-HomeKit-Lib
 )
 
 # Compiler warnings

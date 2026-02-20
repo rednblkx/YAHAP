@@ -3,7 +3,6 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <iostream>
-#include <cstring>
 #include <thread>
 #include <map>
 #include <mutex>
@@ -22,17 +21,29 @@ LinuxNetwork::LinuxNetwork() {
 LinuxNetwork::~LinuxNetwork() {
     running_ = false;
     
-    if (threaded_poll_) {
+    if (threaded_poll_ && poll_running_) {
         avahi_threaded_poll_stop(threaded_poll_);
+        poll_running_ = false;
+    }
+    if (client_) {
+        avahi_client_free(client_);
+        client_ = nullptr;
+    }
+    if (threaded_poll_) {
+        avahi_threaded_poll_free(threaded_poll_);
+        threaded_poll_ = nullptr;
     }
     
-    if (client_) avahi_client_free(client_);
-    if (threaded_poll_) avahi_threaded_poll_free(threaded_poll_);
-
-    // Close all sockets to unblock threads
-    std::lock_guard<std::mutex> lock(g_mutex);
-    for (auto& [id, fd] : g_connections) {
-        close(fd);
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        for (auto& [id, fd] : g_connections) {
+            close(fd);
+        }
+        g_connections.clear();
+    }
+    
+    if (accept_thread_.joinable()) {
+        accept_thread_.join();
     }
 }
 
@@ -43,8 +54,14 @@ void LinuxNetwork::mdns_register(const hap::platform::Network::MdnsService& serv
     name_ = std::string(service.name);
     port_ = service.port;
     
+    if (threaded_poll_ && client_) {
+        mdns_update_txt_record(service);
+        return;
+    }
+    
     if (threaded_poll_) {
-        return; 
+        avahi_threaded_poll_free(threaded_poll_);
+        threaded_poll_ = nullptr;
     }
     
     threaded_poll_ = avahi_threaded_poll_new();
@@ -57,10 +74,21 @@ void LinuxNetwork::mdns_register(const hap::platform::Network::MdnsService& serv
     client_ = avahi_client_new(avahi_threaded_poll_get(threaded_poll_), AVAHI_CLIENT_NO_FAIL, client_callback, this, &error);
     if (!client_) {
         std::cerr << "Failed to create client: " << avahi_strerror(error) << std::endl;
+        avahi_threaded_poll_free(threaded_poll_);
+        threaded_poll_ = nullptr;
         return;
     }
     
-    avahi_threaded_poll_start(threaded_poll_);
+    int ret = avahi_threaded_poll_start(threaded_poll_);
+    if (ret < 0) {
+        std::cerr << "Failed to start threaded poll: " << avahi_strerror(ret) << std::endl;
+        avahi_client_free(client_);
+        client_ = nullptr;
+        avahi_threaded_poll_free(threaded_poll_);
+        threaded_poll_ = nullptr;
+        return;
+    }
+    poll_running_ = true;
 }
 
 void LinuxNetwork::mdns_update_txt_record(const hap::platform::Network::MdnsService& service) {
@@ -234,11 +262,10 @@ void LinuxNetwork::tcp_listen(uint16_t port, hap::platform::Network::ReceiveCall
     accept_thread_ = std::thread([this, port]() {
         this->accept_loop(port);
     });
-    accept_thread_.detach(); // For simplicity in this example
 }
 
 void LinuxNetwork::accept_loop(uint16_t port) {
-    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    int server_fd = socket(AF_INET6, SOCK_STREAM, 0);
     if (server_fd < 0) {
         perror("socket failed");
         return;
@@ -247,22 +274,24 @@ void LinuxNetwork::accept_loop(uint16_t port) {
     int opt = 1;
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
     
-    sockaddr_in address;
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(port);
+    sockaddr_in6 addr{};
+    addr.sin6_family = AF_INET6;
+    addr.sin6_port = htons(port);
+    addr.sin6_addr = in6addr_any;
     
-    if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
+    if (bind(server_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
         perror("bind failed");
+        close(server_fd);
         return;
     }
     
-    if (listen(server_fd, 3) < 0) {
+    if (listen(server_fd, SOMAXCONN) < 0) {
         perror("listen failed");
+        close(server_fd);
         return;
     }
     
-    std::cout << "Listening on port " << port << std::endl;
+    std::cout << "Listening on dual-stack (IPv4+IPv6) port " << port << std::endl;
     
     while (running_) {
         int new_socket = accept(server_fd, nullptr, nullptr);
