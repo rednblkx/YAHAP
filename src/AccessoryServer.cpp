@@ -321,7 +321,6 @@ void AccessoryServer::stop() {
 }
 
 void AccessoryServer::reset_pairing_state() {
-    // Clear ALL pairing-related storage keys
     const char* keys_to_clear[] = {
         "accessory_id",      // Device ID
         "setup_id",          // BLE Setup ID
@@ -329,6 +328,9 @@ void AccessoryServer::reset_pairing_state() {
         "accessory_ltpk",    // Long-term public key
         "pairing_list",      // List of paired controllers
         "gsn",               // Global State Number
+        "config_number",     // Configuration number
+        "ble_addr",
+        "ble_addr_cn"
     };
     
     for (const char* key : keys_to_clear) {
