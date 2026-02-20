@@ -62,3 +62,9 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
         add_subdirectory(tests)
     endif()
 endif()
+
+if(ESP_PLATFORM)
+    idf_component_register()
+    target_link_libraries(${COMPONENT_LIB} INTERFACE hap)
+endif()
+
