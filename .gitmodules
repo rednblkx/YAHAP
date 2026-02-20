@@ -4,3 +4,6 @@
 [submodule "examples/esp32/components/yahap-pal"]
 	path = examples/esp32/components/yahap-pal
 	url = https://github.com/rednblkx/esp32-yahap-pal.git
+[submodule "examples/linux/components/HK-HomeKit-Lib"]
+	path = examples/linux/components/HK-HomeKit-Lib
+	url = https://github.com/rednblkx/DigitalDoorKey.git
