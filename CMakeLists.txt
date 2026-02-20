@@ -1,12 +1,16 @@
+if(ESP_PLATFORM)
+    idf_component_register()
+    target_link_libraries(${COMPONENT_LIB} INTERFACE hap)
+else()
 cmake_minimum_required(VERSION 3.20)
 project(horizon-hap VERSION 0.1.0 LANGUAGES CXX)
-
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_BUILD_TYPE "MinSizeRel" CACHE STRING "Build type")
+endif()
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_library(hap)
 
 target_include_directories(hap PUBLIC
@@ -62,9 +66,3 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
         add_subdirectory(tests)
     endif()
 endif()
-
-if(ESP_PLATFORM)
-    idf_component_register()
-    target_link_libraries(${COMPONENT_LIB} INTERFACE hap)
-endif()
-
