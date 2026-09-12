@@ -1,30 +1,19 @@
 enable_testing()
 
-add_executable(verify_architecture VerifyArchitecture.cpp)
-target_link_libraries(verify_architecture PRIVATE hap)
-add_test(NAME VerifyArchitectureTest COMMAND verify_architecture)
+# VerifyArchitecture is not suffixed like the other test sources.
+add_executable(VerifyArchitectureTest VerifyArchitecture.cpp)
+target_link_libraries(VerifyArchitectureTest PRIVATE hap)
+add_test(NAME VerifyArchitectureTest COMMAND VerifyArchitectureTest)
 
-add_executable(BleTransportTest BleTransportTest.cpp)
-target_link_libraries(BleTransportTest PRIVATE hap)
-add_test(NAME BleTransportTest COMMAND BleTransportTest)
-
-add_executable(tlv8_test TLV8Test.cpp)
-target_link_libraries(tlv8_test PRIVATE hap)
-add_test(NAME TLV8Test COMMAND tlv8_test)
-
-add_executable(http_test HTTPTest.cpp)
-target_link_libraries(http_test PRIVATE hap)
-add_test(NAME HTTPTest COMMAND http_test)
-
-add_executable(json_test JSONTest.cpp)
-target_link_libraries(json_test PRIVATE hap)
-add_test(NAME JSONTest COMMAND json_test)
-
-add_executable(hap_validation_test HAPValidationTest.cpp)
-target_link_libraries(hap_validation_test PRIVATE hap)
-add_test(NAME HAPValidationTest COMMAND hap_validation_test)
-
-add_executable(core_security_test CoreSecurityTest.cpp)
-target_link_libraries(core_security_test PRIVATE hap)
-add_test(NAME CoreSecurityTest COMMAND core_security_test)
-
+foreach(test_target
+    BleTransportTest
+    TLV8Test
+    HTTPTest
+    JSONTest
+    HAPValidationTest
+    CoreSecurityTest
+)
+    add_executable(${test_target} ${test_target}.cpp)
+    target_link_libraries(${test_target} PRIVATE hap)
+    add_test(NAME ${test_target} COMMAND ${test_target})
+endforeach()

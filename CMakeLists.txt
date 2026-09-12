@@ -22,7 +22,7 @@ if(NOT ESP_PLATFORM)
 endif()
 
 set(YAHAP_SOURCES
-    src/AccessoryServer.cpp
+    src/core/AccessoryServer.cpp
     src/common/TaskScheduler.cpp
     src/core/TLV8.cpp
     src/core/AttributeDatabaseJSON.cpp

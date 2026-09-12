@@ -75,10 +75,14 @@ To port this library, implement these abstract interfaces:
 ```
 YAHAP/
 ├── include/hap/
+│   ├── AccessoryServer.hpp
+│   ├── common/            # Result, TaskScheduler
 │   ├── core/              # HAP object model
 │   │   ├── Accessory.hpp
 │   │   ├── Service.hpp
 │   │   ├── Characteristic.hpp
+│   │   ├── AttributeDatabase.hpp
+│   │   ├── IIDManager.hpp
 │   │   └── TLV8.hpp
 │   ├── platform/          # Abstract platform interfaces
 │   │   ├── Crypto.hpp
@@ -89,14 +93,16 @@ YAHAP/
 │   │   └── Ble.hpp
 │   ├── transport/         # Protocol implementations
 │   │   ├── HTTP.hpp
-│   │   ├── BleTransport.hpp
+│   │   ├── Router.hpp
 │   │   ├── SecureSession.hpp
+│   │   ├── BleTransport.hpp
+│   │   ├── ble/           # HAP-BLE PDU, sessions, TLV builder
 │   │   └── PairingEndpoints.hpp
 │   ├── pairing/           # Pairing protocol
 │   │   ├── PairSetup.hpp
 │   │   └── PairVerify.hpp
-│   └── AccessoryServer.hpp
-├── src/                   # Implementation files
+│   └── types/             # Characteristic / Service type definitions
+├── src/                   # Implementation files (mirrors include/hap/)
 ├── examples/
 │   ├── esp32/             # ESP-IDF BLE example
 │   ├── esp32-ip/          # ESP-IDF IP example
