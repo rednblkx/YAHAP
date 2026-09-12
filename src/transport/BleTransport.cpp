@@ -1026,13 +1026,21 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                             return;
                         }
                         
-                        // Pass EventSource so the originating connection is excluded from notifications
                         ch->set_value(new_value, core::EventSource::from_connection(connection_id));
-                        config_.system->log(platform::System::LogLevel::Info, 
+                        config_.system->log(platform::System::LogLevel::Info,
                             "[BleTransport] Execute Timed Write IID=" + std::to_string(state.timed_write_iid) + " success");
-                        
+
+                        // Notify subscribers exactly like the direct write path:
+                        // a timed write that changes a Notify characteristic must
+                        // produce an event, or controllers wait forever (e.g.
+                        // "Unlocking..." until the state is re-read).
+                        auto char_info = find_char_info(state.timed_write_iid);
+                        handle_characteristic_change(char_info.accessory_id,
+                                                     state.timed_write_iid, new_value,
+                                                     connection_id);
+
                         // HAP 7.4.6.1: GSN increments once for multiple
-                     // characteristic changes while in the connected state
+                        // characteristic changes while in the connected state
                         if (!state.gsn_incremented) {
                             state.gsn_incremented = true;
                             increment_gsn();
@@ -1560,10 +1568,13 @@ void BleTransport::handle_characteristic_change(uint64_t aid, uint64_t iid,
     }
     std::string uuid = it->second;
     
+    // exclude_conn_id == kNoConnectionExclusion (0) means "notify everyone";
+    // otherwise skip the connection that caused the change. Note BLE connection
+    // IDs start at 0, so the sentinel must be checked explicitly.
     bool has_connected_subscribers = false;
     if (session_manager_->has_subscribers(uuid)) {
         for (uint16_t conn_id : session_manager_->get_subscribers(uuid)) {
-            if (conn_id != exclude_conn_id) {
+            if (exclude_conn_id == kNoConnectionExclusion || conn_id != exclude_conn_id) {
                 has_connected_subscribers = true;
                 break;
             }

@@ -14,10 +14,6 @@
 
 namespace hap {
 
-/// Sentinel for broadcast_event: connection IDs are 1-based, so 0 excludes
-/// nothing (matches the documented default of `exclude_conn_id = 0`).
-static constexpr uint32_t kNoConnectionExclusion = 0;
-
 class AccessoryServer::Impl {
 public:
     std::unique_ptr<transport::Router> router;

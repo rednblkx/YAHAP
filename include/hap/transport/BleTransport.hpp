@@ -14,6 +14,10 @@
 
 namespace hap::transport {
 
+/// Sentinel for event exclusion: connection IDs are >= 0 and BLE starts at 0,
+/// so "exclude nobody" must be checked explicitly against this constant.
+inline constexpr uint32_t kNoConnectionExclusion = 0;
+
 /**
  * @brief Implements the HAP over BLE transport layer.
  * 

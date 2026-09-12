@@ -1,4 +1,6 @@
 #include "hap/transport/BleTransport.hpp"
+#include "hap/types/ServiceTypes.hpp"
+#include "hap/core/HAPStatus.hpp"
 #include "TestUtil.hpp"
 #include "MockPal.hpp"
 
@@ -64,6 +66,10 @@ public:
         disconnect_callback_ = callback;
     }
 
+    void set_connect_callback(ConnectCallback callback) override {
+        connect_callback_ = callback;
+    }
+
     void start_timed_advertising(const Advertisement& data,
                                  uint32_t fast_interval_ms,
                                  uint32_t fast_duration_ms,
@@ -82,6 +88,23 @@ public:
             }
         }
         return {};
+    }
+
+    // Simulate the BLE stack establishing a connection.
+    void connect(uint16_t conn_id) {
+        if (connect_callback_) connect_callback_(conn_id);
+    }
+
+    // Simulate the phone enabling/disabling indications on a characteristic.
+    void subscribe(const std::string& uuid, uint16_t conn_id, bool enabled) {
+        for (const auto& svc : registered_services) {
+            for (const auto& ch : svc.characteristics) {
+                if (ch.uuid == uuid && ch.on_subscribe) {
+                    ch.on_subscribe(conn_id, enabled);
+                    return;
+                }
+            }
+        }
     }
 
     // Simulate a GATT write on a registered characteristic.
@@ -108,6 +131,7 @@ public:
 
 private:
     DisconnectCallback disconnect_callback_;
+    ConnectCallback connect_callback_;
 };
 
 static constexpr const char* kPairSetupUUID = "0000004C-0000-1000-8000-0026BB765291";
@@ -368,11 +392,166 @@ void test_timed_write_then_execute() {
     CHECK_EQ_HEX(response[2], 0x00); // Status: OK
 }
 
+// Regression: a timed write + execute on a user characteristic must produce a
+// Connected Event (zero-length indication) for subscribed controllers. Missing
+// this left controllers stuck waiting for state-change events ("Unlocking...").
+void test_timed_write_fires_connected_event() {
+    MockBle ble;
+    testmock::MockCrypto crypto;
+    testmock::MockStorage storage;
+    testmock::MockSystem system{false};
+    MockPairingEndpoints endpoints;
+
+    // The user characteristic must exist BEFORE the transport starts so it
+    // gets registered as a GATT characteristic.
+    core::AttributeDatabase db;
+    auto acc = std::make_shared<core::Accessory>(1);
+    auto svc = std::make_shared<core::Service>(0x43, "Lightbulb");
+    auto on_char = std::make_shared<core::Characteristic>(
+        0x25, core::Format::Bool,
+        std::vector{core::Permission::PairedRead, core::Permission::PairedWrite,
+                    core::Permission::Notify, core::Permission::TimedWrite});
+    svc->add_characteristic(on_char);
+    acc->add_service(svc);
+    db.add_accessory(acc);
+
+    BleTransport::Config config;
+    config.ble = &ble;
+    config.crypto = &crypto;
+    config.storage = &storage;
+    config.system = &system;
+    config.database = &db;
+    config.pairing_endpoints = &endpoints;
+    config.accessory_id = "11:22:33:44:55:66";
+    config.device_name = "Dev";
+    BleTransport transport(config);
+    transport.start();
+
+    // Find the On characteristic's GATT definition and its IID.
+    const std::string kOnUUID = "00000025-0000-1000-8000-0026BB765291";
+    const auto* def = ble.find(kOnUUID);
+    CHECK(def != nullptr);
+    uint16_t iid = 0;
+    for (const auto& d : def->descriptors) {
+        if (d.uuid == kCharInstanceIdDescUUID && d.on_read) {
+            auto v = d.on_read(0);
+            iid = static_cast<uint16_t>(v[0] | (v[1] << 8));
+        }
+    }
+    CHECK(iid != 0);
+
+    // Subscribe from a DIFFERENT connection than the writer (conn 1), mirroring
+    // a second controller listening: the writer's own connection is excluded
+    // from its own change events.
+    ble.subscribe(kOnUUID, 2, true);
+
+    // Timed write: Value TLV = 0x01 (true).
+    std::vector<uint8_t> tlvs = {0x01, 0x01, 0x01};
+    std::vector<uint8_t> pdu;
+    pdu.push_back(0x00);
+    pdu.push_back(0x04); // CharacteristicTimedWrite
+    pdu.push_back(0x09); // TID
+    pdu.push_back(static_cast<uint8_t>(iid & 0xFF));
+    pdu.push_back(static_cast<uint8_t>(iid >> 8));
+    uint16_t len = static_cast<uint16_t>(tlvs.size());
+    pdu.push_back(len & 0xFF);
+    pdu.push_back((len >> 8) & 0xFF);
+    pdu.insert(pdu.end(), tlvs.begin(), tlvs.end());
+    ble.write(kOnUUID, 1, pdu, false);
+
+    // Execute write.
+    std::vector<uint8_t> exec = {0x00, 0x05, 0x0A,
+                                 static_cast<uint8_t>(iid & 0xFF),
+                                 static_cast<uint8_t>(iid >> 8)};
+    ble.write(kOnUUID, 1, exec, false);
+
+    // The characteristic value must have been applied...
+    auto v = on_char->get_value();
+    CHECK(std::holds_alternative<core::Value>(v));
+    CHECK(std::get<bool>(std::get<core::Value>(v)) == true);
+
+    // ...and a zero-length Connected Event indication must have been sent to
+    // the subscribed (non-writing) connection.
+    bool got_indication = false;
+    for (const auto& n : ble.sent_notifications) {
+        if (n.uuid == kOnUUID && n.conn_id == 2 && n.data.empty()) {
+            got_indication = true;
+        }
+    }
+    CHECK(got_indication);
+}
+
+// End-to-end through AccessoryServer: a timed write to LockTargetState must
+// produce zero-length indications for BOTH lock characteristics on the writing
+// connection (BLE conn IDs start at 0 — the "notify everyone" sentinel must
+// not collide with connection 0).
+void test_lock_timed_write_notifies_writer_connection() {
+    MockBle ble;
+    testmock::MockCrypto crypto;
+    testmock::MockStorage storage;
+    testmock::MockSystem system{true};
+    MockPairingEndpoints endpoints;
+
+    core::AttributeDatabase db;
+    auto acc = std::make_shared<core::Accessory>(1);
+    auto lock = hap::service::LockMechanismBuilder().on_lock_change([](bool) {}).build();
+    acc->add_service(lock);
+    CHECK_EQ(db.add_accessory(acc), core::ValidationResult::Success);
+
+    BleTransport::Config config;
+    config.ble = &ble;
+    config.crypto = &crypto;
+    config.storage = &storage;
+    config.system = &system;
+    config.database = &db;
+    config.pairing_endpoints = &endpoints;
+    config.accessory_id = "11:22:33:44:55:66";
+    BleTransport transport(config);
+    transport.start();
+
+    ble.connect(0);
+    ble.subscribe("0000001D-0000-1000-8000-0026BB765291", 0, true); // CurrentState
+    ble.subscribe("0000001E-0000-1000-8000-0026BB765291", 0, true); // TargetState
+
+    auto& chars = lock->characteristics();
+    uint16_t tgt_iid = static_cast<uint16_t>(chars[1]->iid());
+
+    auto pdu_for = [&](uint8_t op, uint8_t tid, const std::vector<uint8_t>& tlvs) {
+        std::vector<uint8_t> p{0x00, op, tid,
+            static_cast<uint8_t>(tgt_iid & 0xFF), static_cast<uint8_t>(tgt_iid >> 8),
+            static_cast<uint8_t>(tlvs.size() & 0xFF), static_cast<uint8_t>(tlvs.size() >> 8)};
+        p.insert(p.end(), tlvs.begin(), tlvs.end());
+        return p;
+    };
+    ble.write("0000001E-0000-1000-8000-0026BB765291", 0,
+              pdu_for(0x04, 1, {0x01, 0x01, 0x00}), false);
+    ble.write("0000001E-0000-1000-8000-0026BB765291", 0, pdu_for(0x05, 2, {}), false);
+
+    // Value must be applied...
+    auto v = chars[0]->get_value();
+    CHECK(std::holds_alternative<core::Value>(v));
+    CHECK_EQ(std::get<uint8_t>(std::get<core::Value>(v)), 0);
+
+    // ...and the writing connection (0) must receive the TargetState indication.
+    // (The CurrentState indication flows through AccessoryServer::broadcast_event,
+    // covered by the end-to-end test in CoreSecurityTest.)
+    int tgt_indications = 0;
+    for (const auto& n : ble.sent_notifications) {
+        if (n.conn_id == 0 && n.data.empty() &&
+            n.uuid == "0000001E-0000-1000-8000-0026BB765291") {
+            ++tgt_indications;
+        }
+    }
+    CHECK(tgt_indications >= 1);
+}
+
 int main() {
     RUN_TEST(test_advertising_layout);
     RUN_TEST(test_pdu_reassembly);
     RUN_TEST(test_service_signature_read);
     RUN_TEST(test_write_with_response);
     RUN_TEST(test_timed_write_then_execute);
+    RUN_TEST(test_timed_write_fires_connected_event);
+    RUN_TEST(test_lock_timed_write_notifies_writer_connection);
     return 0;
 }
