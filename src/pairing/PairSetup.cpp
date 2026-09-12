@@ -1,7 +1,8 @@
 #include "hap/pairing/PairSetup.hpp"
 #include "hap/pairing/PairingKeys.hpp"
+#include "hap/common/Log.hpp"
+#include "hap/common/JsonValue.hpp"
 #include <algorithm>
-#include <nlohmann/json.hpp>
 
 namespace hap::pairing {
 
@@ -28,21 +29,18 @@ void PairSetup::ensure_long_term_keys() {
 }
 
 std::optional<std::vector<uint8_t>> PairSetup::handle_request(std::span<const uint8_t> request_tlv) {
-    config_.system->log(platform::System::LogLevel::Debug, 
-        "[PairSetup] Received request (" + std::to_string(request_tlv.size()) + " bytes)");
+    HAP_LOG(config_.system, "[PairSetup] Received request (", request_tlv.size(), " bytes)");
     
     auto tlvs = core::TLV8::parse(request_tlv);
     
     auto state_val = core::TLV8::find_uint8(tlvs, static_cast<uint8_t>(TLVType::State));
     if (!state_val) {
-        config_.system->log(platform::System::LogLevel::Error, 
-            "[PairSetup] No state TLV found in request");
+        HAP_LOG_ERROR(config_.system, "[PairSetup] No state TLV found in request");
         return build_error_response(PairingState::M2, TLVError::Unknown);
     }
     
     PairingState requested_state = static_cast<PairingState>(*state_val);
-    config_.system->log(platform::System::LogLevel::Info, 
-        "[PairSetup] Processing message state: M" + std::to_string(static_cast<int>(*state_val)));
+    HAP_LOG_INFO(config_.system, "[PairSetup] Processing message state: M", static_cast<int>(*state_val));
     
     switch (requested_state) {
         case PairingState::M1:
@@ -52,42 +50,36 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_request(std::span<const ui
         case PairingState::M5:
             return handle_m5(tlvs);
         default:
-            config_.system->log(platform::System::LogLevel::Error, 
-                "[PairSetup] Unknown pairing state: " + std::to_string(*state_val));
+            HAP_LOG_ERROR(config_.system, "[PairSetup] Unknown pairing state: ", *state_val);
             return build_error_response(PairingState::M2, TLVError::Unknown);
     }
 }
 
 std::optional<std::vector<uint8_t>> PairSetup::handle_m1(const std::vector<core::TLV>& request) {
-    config_.system->log(platform::System::LogLevel::Info, "[PairSetup] Processing M1 (SRP Start Request)");
+    HAP_LOG_INFO(config_.system, "[PairSetup] Processing M1 (SRP Start Request)");
     
     if (state_ != State::M1_AwaitingSRPStartRequest) {
-        config_.system->log(platform::System::LogLevel::Error, 
-            "[PairSetup] Unexpected state for M1 - current state: " + std::to_string(static_cast<int>(state_)));
+        HAP_LOG_ERROR(config_.system, "[PairSetup] Unexpected state for M1 - current state: ", static_cast<int>(state_));
         return build_error_response(PairingState::M2, TLVError::Unknown);
     }
     
     auto method = core::TLV8::find_uint8(request, static_cast<uint8_t>(TLVType::Method));
     if (!method || *method != static_cast<uint8_t>(PairingMethod::PairSetup)) {
-        config_.system->log(platform::System::LogLevel::Error, 
-            "[PairSetup] Invalid or missing pairing method in M1");
+        HAP_LOG_ERROR(config_.system, "[PairSetup] Invalid or missing pairing method in M1");
         return build_error_response(PairingState::M2, TLVError::Unknown);
     }
     
-    config_.system->log(platform::System::LogLevel::Debug, "[PairSetup] Creating SRP verifier");
+    HAP_LOG(config_.system, "[PairSetup] Creating SRP verifier");
     srp_session_ = config_.crypto->srp_new_verifier("Pair-Setup", config_.setup_code);
     if (!srp_session_) {
-        config_.system->log(platform::System::LogLevel::Error, 
-            "[PairSetup] Failed to create SRP session");
+        HAP_LOG_ERROR(config_.system, "[PairSetup] Failed to create SRP session");
         return build_error_response(PairingState::M2, TLVError::Unknown);
     }
     
     auto salt = config_.crypto->srp_get_salt(srp_session_.get());
     auto public_key = config_.crypto->srp_get_public_key(srp_session_.get());
     
-    config_.system->log(platform::System::LogLevel::Debug, 
-        "[PairSetup] SRP salt size: " + std::to_string(salt.size()) + 
-        ", public key size: " + std::to_string(public_key.size()));
+    HAP_LOG(config_.system, "[PairSetup] SRP salt size: ", salt.size(), ", public key size: ", public_key.size());
     
     std::vector<core::TLV> response_tlvs;
     response_tlvs.emplace_back(static_cast<uint8_t>(TLVType::State), static_cast<uint8_t>(PairingState::M2));
@@ -95,16 +87,15 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m1(const std::vector<core:
     response_tlvs.emplace_back(static_cast<uint8_t>(TLVType::PublicKey), public_key);
     
     state_ = State::M3_AwaitingSRPVerifyRequest;
-    config_.system->log(platform::System::LogLevel::Info, "[PairSetup] M2 response ready");
+    HAP_LOG_INFO(config_.system, "[PairSetup] M2 response ready");
     return core::TLV8::encode(response_tlvs);
 }
 
 std::optional<std::vector<uint8_t>> PairSetup::handle_m3(const std::vector<core::TLV>& request) {
-    config_.system->log(platform::System::LogLevel::Info, "[PairSetup] Processing M3 (SRP Verify Request)");
+    HAP_LOG_INFO(config_.system, "[PairSetup] Processing M3 (SRP Verify Request)");
     
     if (state_ != State::M3_AwaitingSRPVerifyRequest || !srp_session_) {
-        config_.system->log(platform::System::LogLevel::Error, 
-            "[PairSetup] Unexpected state for M3 or missing SRP session");
+        HAP_LOG_ERROR(config_.system, "[PairSetup] Unexpected state for M3 or missing SRP session");
         return build_error_response(PairingState::M4, TLVError::Unknown);
     }
     
@@ -112,76 +103,66 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m3(const std::vector<core:
     auto client_proof = core::TLV8::find(request, static_cast<uint8_t>(TLVType::Proof));
     
     if (!client_public_key || !client_proof) {
-        config_.system->log(platform::System::LogLevel::Error, 
-            "[PairSetup] Missing client public key or proof in M3");
+        HAP_LOG_ERROR(config_.system, "[PairSetup] Missing client public key or proof in M3");
         return build_error_response(PairingState::M4, TLVError::Unknown);
     }
     
-    config_.system->log(platform::System::LogLevel::Debug, 
-        "[PairSetup] Client public key size: " + std::to_string(client_public_key->size()) + 
-        ", proof size: " + std::to_string(client_proof->size()));
+    HAP_LOG(config_.system, "[PairSetup] Client public key size: ", client_public_key->size(), ", proof size: ", client_proof->size());
     
     if (!config_.crypto->srp_set_client_public_key(srp_session_.get(), *client_public_key)) {
-        config_.system->log(platform::System::LogLevel::Error, 
-            "[PairSetup] Failed to set client public key");
+        HAP_LOG_ERROR(config_.system, "[PairSetup] Failed to set client public key");
         return build_error_response(PairingState::M4, TLVError::Authentication);
     }
     
-    config_.system->log(platform::System::LogLevel::Debug, "[PairSetup] Verifying client proof");
+    HAP_LOG(config_.system, "[PairSetup] Verifying client proof");
     if (!config_.crypto->srp_verify_client_proof(srp_session_.get(), *client_proof)) {
-        config_.system->log(platform::System::LogLevel::Error, 
-            "[PairSetup] Client proof verification FAILED");
+        HAP_LOG_ERROR(config_.system, "[PairSetup] Client proof verification FAILED");
         return build_error_response(PairingState::M4, TLVError::Authentication);
     }
     
-    config_.system->log(platform::System::LogLevel::Info, "[PairSetup] Client proof verified successfully");
+    HAP_LOG_INFO(config_.system, "[PairSetup] Client proof verified successfully");
     
     auto server_proof = config_.crypto->srp_get_server_proof(srp_session_.get());
     session_key_ = config_.crypto->srp_get_session_key(srp_session_.get());
     
-    config_.system->log(platform::System::LogLevel::Debug, 
-        "[PairSetup] Server proof size: " + std::to_string(server_proof.size()) + 
-        ", session key size: " + std::to_string(session_key_.size()));
+    HAP_LOG(config_.system, "[PairSetup] Server proof size: ", server_proof.size(), ", session key size: ", session_key_.size());
     
     std::vector<core::TLV> response_tlvs;
     response_tlvs.emplace_back(static_cast<uint8_t>(TLVType::State), static_cast<uint8_t>(PairingState::M4));
     response_tlvs.emplace_back(static_cast<uint8_t>(TLVType::Proof), server_proof);
     
     state_ = State::M5_AwaitingExchangeRequest;
-    config_.system->log(platform::System::LogLevel::Info, "[PairSetup] M4 response ready");
+    HAP_LOG_INFO(config_.system, "[PairSetup] M4 response ready");
     return core::TLV8::encode(response_tlvs);
 }
 
 std::optional<std::vector<uint8_t>> PairSetup::handle_m5(const std::vector<core::TLV>& request) {
-    config_.system->log(platform::System::LogLevel::Info, "[PairSetup] Processing M5 (Exchange Request)");
+    HAP_LOG_INFO(config_.system, "[PairSetup] Processing M5 (Exchange Request)");
     
     if (state_ != State::M5_AwaitingExchangeRequest || session_key_.empty()) {
-        config_.system->log(platform::System::LogLevel::Error, 
-            "[PairSetup] Unexpected state for M5 or missing session key");
+        HAP_LOG_ERROR(config_.system, "[PairSetup] Unexpected state for M5 or missing session key");
         return build_error_response(PairingState::M6, TLVError::Unknown);
     }
     
     auto encrypted_data_tlv = core::TLV8::find(request, static_cast<uint8_t>(TLVType::EncryptedData));
     if (!encrypted_data_tlv || encrypted_data_tlv->size() < 16) {
-        config_.system->log(platform::System::LogLevel::Error, 
-            "[PairSetup] Missing or invalid encrypted data in M5");
+        HAP_LOG_ERROR(config_.system, "[PairSetup] Missing or invalid encrypted data in M5");
         return build_error_response(PairingState::M6, TLVError::Authentication);
     }
     
-    config_.system->log(platform::System::LogLevel::Debug, 
-        "[PairSetup] Encrypted data size: " + std::to_string(encrypted_data_tlv->size()));
+    HAP_LOG(config_.system, "[PairSetup] Encrypted data size: ", encrypted_data_tlv->size());
 
     std::vector<uint8_t> ciphertext(encrypted_data_tlv->begin(), encrypted_data_tlv->end() - 16);
     std::array<uint8_t, 16> auth_tag;
     std::copy_n(encrypted_data_tlv->end() - 16, 16, auth_tag.begin());
     
     std::array<uint8_t, 32> session_key;
-    config_.system->log(platform::System::LogLevel::Debug, "[PairSetup] Deriving session key using HKDF");
-    config_.system->log(platform::System::LogLevel::Debug, "[PairSetup] Session key size: " + std::to_string(session_key_.size()));
+    HAP_LOG(config_.system, "[PairSetup] Deriving session key using HKDF");
+    HAP_LOG(config_.system, "[PairSetup] Session key size: ", session_key_.size());
     std::string hkdf_salt = "Pair-Setup-Encrypt-Salt";
     std::string hkdf_info = "Pair-Setup-Encrypt-Info";
-    config_.system->log(platform::System::LogLevel::Debug, "[PairSetup] HKDF salt: " + hkdf_salt);
-    config_.system->log(platform::System::LogLevel::Debug, "[PairSetup] HKDF info: " + hkdf_info);
+    HAP_LOG(config_.system, "[PairSetup] HKDF salt: ", hkdf_salt);
+    HAP_LOG(config_.system, "[PairSetup] HKDF info: ", hkdf_info);
     config_.crypto->hkdf_sha512(
         session_key_,
         std::span(reinterpret_cast<const uint8_t*>(hkdf_salt.data()), hkdf_salt.size()),
@@ -193,17 +174,15 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m5(const std::vector<core:
     std::array<uint8_t, 12> nonce = {};
     std::copy_n(nonce_str, sizeof(nonce_str) - 1, nonce.begin());
     
-    config_.system->log(platform::System::LogLevel::Debug, "[PairSetup] Decrypting M5 payload");
+    HAP_LOG(config_.system, "[PairSetup] Decrypting M5 payload");
     std::vector<uint8_t> plaintext(ciphertext.size());
     if (!config_.crypto->chacha20_poly1305_decrypt_and_verify(
             session_key, nonce, {}, ciphertext, auth_tag, plaintext)) {
-        config_.system->log(platform::System::LogLevel::Error, 
-            "[PairSetup] Failed to decrypt M5 payload");
+        HAP_LOG_ERROR(config_.system, "[PairSetup] Failed to decrypt M5 payload");
         return build_error_response(PairingState::M6, TLVError::Authentication);
     }
     
-    config_.system->log(platform::System::LogLevel::Debug, 
-        "[PairSetup] Decrypted " + std::to_string(plaintext.size()) + " bytes");
+    HAP_LOG(config_.system, "[PairSetup] Decrypted ", plaintext.size(), " bytes");
     
     auto sub_tlvs = core::TLV8::parse(plaintext);
     auto ios_identifier = core::TLV8::find(sub_tlvs, static_cast<uint8_t>(TLVType::Identifier));
@@ -234,35 +213,31 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m5(const std::vector<core:
     std::array<uint8_t, 64> ios_sig_arr;
     std::copy_n(ios_signature->begin(), 64, ios_sig_arr.begin());
     
-    config_.system->log(platform::System::LogLevel::Debug, "[PairSetup] Verifying iOS device signature");
+    HAP_LOG(config_.system, "[PairSetup] Verifying iOS device signature");
     if (!config_.crypto->ed25519_verify(ios_ltpk_arr, ios_device_info, ios_sig_arr)) {
-        config_.system->log(platform::System::LogLevel::Error, 
-            "[PairSetup] iOS device signature verification FAILED");
+        HAP_LOG_ERROR(config_.system, "[PairSetup] iOS device signature verification FAILED");
         return build_error_response(PairingState::M6, TLVError::Authentication);
     }
     
-    config_.system->log(platform::System::LogLevel::Info, "[PairSetup] iOS device signature verified successfully");
+    HAP_LOG_INFO(config_.system, "[PairSetup] iOS device signature verified successfully");
     
     std::string pairing_id(ios_identifier->begin(), ios_identifier->end());
     std::string pairing_key = "pairing_" + pairing_id;
-    config_.system->log(platform::System::LogLevel::Info, 
-        "[PairSetup] Saving pairing for controller: " + pairing_id);
+    HAP_LOG_INFO(config_.system, "[PairSetup] Saving pairing for controller: ", pairing_id);
     config_.storage->set(pairing_key, *ios_ltpk);
 
     auto list_data = config_.storage->get("pairing_list");
-    nlohmann::json list_json;
-    if (list_data) {
-        list_json = nlohmann::json::parse(list_data->begin(), list_data->end(), nullptr, false);
-        if (list_json.is_discarded()) {
-            list_json = nlohmann::json::array();
-        }
-    } else {
-        list_json = nlohmann::json::array();
+    bool parse_error = false;
+    hap::common::JsonValue list_json = list_data
+        ? hap::common::JsonValue::parse(std::string_view(reinterpret_cast<const char*>(list_data->data()), list_data->size()), &parse_error)
+        : hap::common::JsonValue();
+    if (parse_error || !list_json.is_array()) {
+        list_json = hap::common::JsonValue::array();
     }
-    
+
     bool exists = false;
-    for (const auto& id : list_json) {
-        if (id == pairing_id) {
+    for (const auto& id : list_json.items()) {
+        if (id.is_string() && id.as_string() == pairing_id) {
             exists = true;
             break;
         }
@@ -272,7 +247,7 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m5(const std::vector<core:
         std::string list_str = list_json.dump();
         std::vector<uint8_t> list_bytes(list_str.begin(), list_str.end());
         config_.storage->set("pairing_list", list_bytes);
-        
+
         if (config_.on_pairings_changed) {
             config_.on_pairings_changed(pairing_id, ios_ltpk_arr, true);
         }
@@ -324,8 +299,7 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m5(const std::vector<core:
     response_tlvs.emplace_back(static_cast<uint8_t>(TLVType::EncryptedData), ciphertext_m6);
     
     state_ = State::Completed;
-    config_.system->log(platform::System::LogLevel::Info, 
-        "[PairSetup] Pair-Setup completed successfully! M6 response ready.");
+    HAP_LOG_INFO(config_.system, "[PairSetup] Pair-Setup completed successfully! M6 response ready.");
     return core::TLV8::encode(response_tlvs);
 }
 

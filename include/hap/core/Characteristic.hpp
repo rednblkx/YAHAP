@@ -171,48 +171,13 @@ public:
      * @param source The source of the write (e.g., connection ID).
      * @return nullopt on success, or HAPStatus error code on failure.
      */
-    WriteResponse set_value(Value value, EventSource source = {}) {
-        value_ = coerce_value(std::move(value));
-        
-        WriteResponse result = std::nullopt; // Success by default
-        
-        if (write_callback_ && source.type == EventSource::Type::Connection) {
-            // Synchronous callback - captures result
-            result = write_callback_(value_);
-            if (result.has_value()) {
-                return result; // Return error immediately
-            }
-        }
-        
-        if (event_callback_ && source.type == EventSource::Type::NotifyChange) {
-            if (dispatcher_) {
-                Value captured_value = value_;
-                auto cb = event_callback_;
-                dispatcher_([cb, captured_value, source]() { cb(captured_value, source); });
-            } else {
-                event_callback_(value_, source);
-            }
-        }
-        
-        return result;
-    }
+    WriteResponse set_value(Value value, EventSource source = {});
 
     /**
      * @brief Get the characteristic value.
      * @return Value on success, or HAPStatus error code if read callback fails.
      */
-    ReadResponse get_value() const {
-        if (read_cb_) {
-            auto result = read_cb_();
-            // If callback returned a Value, coerce it
-            if (std::holds_alternative<Value>(result)) {
-                return coerce_value(std::get<Value>(result));
-            }
-            // Otherwise return the error status as-is
-            return result;
-        }
-        return value_;
-    }
+    ReadResponse get_value() const;
 
     void on_read(ReadCallback cb) { read_cb_ = std::move(cb); }
     void set_write_callback(WriteCallback callback) { write_callback_ = std::move(callback); }
@@ -274,41 +239,11 @@ private:
     std::optional<std::pair<double, double>> valid_values_range_; // Valid values range
     
     DispatcherFunc dispatcher_;
-    
-    /**
-     * @brief Coerces a value to the correct variant type based on format_
-     * 
-     * This allows application code to use natural literals (e.g., set_value(0))
-     * without needing explicit casts like static_cast<uint8_t>(0).
-     */
-    Value coerce_value(Value input) const {
-        return std::visit([this, &input](auto&& arg) -> Value {
-            using T = std::decay_t<decltype(arg)>;
-            
-            if constexpr (std::is_arithmetic_v<T>) {
-                switch (format_) {
-                    case Format::Bool:
-                        return static_cast<bool>(arg);
-                    case Format::UInt8:
-                        return static_cast<uint8_t>(arg);
-                    case Format::UInt16:
-                        return static_cast<uint16_t>(arg);
-                    case Format::UInt32:
-                        return static_cast<uint32_t>(arg);
-                    case Format::UInt64:
-                        return static_cast<uint64_t>(arg);
-                    case Format::Int:
-                        return static_cast<int32_t>(arg);
-                    case Format::Float:
-                        return static_cast<float>(arg);
-                    default:
-                        return input;
-                }
-            } else {
-                return input;
-            }
-        }, input);
-    }
+
+    // Defined once in Characteristic.cpp: std::visit over the 9-alternative
+    // Value variant expands to a large jump table, and a header-inline copy
+    // was being emitted in every translation unit that touched values.
+    Value coerce_value(Value input) const;
 };
 
 } // namespace hap::core

@@ -9,7 +9,7 @@ A modern C++20 implementation of the HomeKit Accessory Protocol (HAP) with a foc
 - **Secure Sessions**: ChaCha20-Poly1305 encrypted communication with session key derivation
 - **Platform Agnostic**: Clean abstraction layer allows porting to any platform
 - **Modern C++20**: Uses `std::span`, concepts, and modern language features
-- **Embedded-friendly**: No RTTI required; exception-free error handling via `common::Result` and status codes. (The library itself still compiles with exceptions enabled — required by nlohmann/json — but no library code throws.)
+- **Embedded-friendly**: No RTTI required; exception-free error handling via `common::Result` and status codes. No external dependencies and no exceptions anywhere.
 
 ## Architecture
 
@@ -114,8 +114,15 @@ YAHAP/
 
 - **CMake** 3.20+
 - **C++20** compatible compiler (GCC 10+, Clang 12+)
-- **nlohmann/json** (fetched automatically via CMake for native builds; the
-  ESP-IDF component manager provides it for ESP32 examples)
+
+The library has no external dependencies: it ships its own minimal JSON value
+type (`hap/common/JsonValue.hpp`) sized for the HAP protocol surface, and all
+logging is compile-time gated by `HAP_LOG_LEVEL` (0=Debug, 1=Info [default],
+2=Warning, 3=Error — set via `-DYAHAP_LOG_LEVEL=<n>` when building the
+library; lower levels drop log strings and formatting code from the binary
+entirely). The library also compiles with `-ffunction-sections` /
+`-fdata-sections` so the linker can strip unused services and endpoints from
+the final image.
 
 The ESP32 examples consume YAHAP directly as an ESP-IDF component (symlinked
 at `examples/*/components/yahap`) and require the `yahap-pal` git submodules
@@ -130,10 +137,9 @@ The repository root is a valid ESP-IDF component. Add it to your project:
 mkdir -p components && ln -s /path/to/YAHAP components/yahap
 ```
 
-or place/copy the repository there. The component declares its sources and
-its `nlohmann-json` dependency in the root `idf_component.yml`, which the
-IDF component manager resolves automatically. Then add `yahap` to your
-component's `REQUIRES`:
+or place/copy the repository there. The component declares its sources in the
+root `CMakeLists.txt` and has no dependencies to resolve. Then add `yahap` to
+your component's `REQUIRES`:
 
 ```cmake
 idf_component_register(... REQUIRES yahap ...)

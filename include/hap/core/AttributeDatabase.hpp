@@ -3,32 +3,28 @@
 #include "hap/core/Accessory.hpp"
 #include "hap/core/HAPValidation.hpp"
 #include "hap/core/IIDManager.hpp"
-#include <nlohmann/json.hpp>
+#include "hap/common/JsonValue.hpp"
+#include <charconv>
+#include <cstdint>
+#include <string>
 #include <type_traits>
 #include <vector>
 #include <memory>
-#include <sstream>
-#include <iomanip>
 
 namespace hap::core {
 
-static inline std::string base64_encode(const std::vector<uint8_t>& data) {
-    static const char* encoding_table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string encoded;
-    encoded.reserve(((data.size() + 2) / 3) * 4);
-    
-    for (size_t i = 0; i < data.size(); i += 3) {
-        uint32_t val = (data[i] << 16);
-        if (i + 1 < data.size()) val |= (data[i + 1] << 8);
-        if (i + 2 < data.size()) val |= data[i + 2];
-        
-        encoded.push_back(encoding_table[(val >> 18) & 0x3F]);
-        encoded.push_back(encoding_table[(val >> 12) & 0x3F]);
-        encoded.push_back(i + 1 < data.size() ? encoding_table[(val >> 6) & 0x3F] : '=');
-        encoded.push_back(i + 2 < data.size() ? encoding_table[val & 0x3F] : '=');
-    }
-    return encoded;
-}
+/**
+ * @brief Convert a characteristic Value to its JSON representation.
+ *
+ * Binary values (TLV8/Data) are base64-encoded; this is the single source of
+ * truth for value serialization in event notifications, /accessories, and
+ * /characteristics responses.
+ */
+hap::common::JsonValue value_to_json(const Value& value);
+
+// Base64 encoding used by value_to_json; exposed for the endpoints that
+// decode values back from JSON.
+std::string base64_encode(const std::vector<uint8_t>& data);
 
 /**
  * @brief HAP Attribute Database
@@ -186,40 +182,57 @@ private:
      */
     void assign_iids(const std::shared_ptr<Accessory>& accessory) {
         uint64_t aid = accessory->aid();
-        
+
+        // Stable keys embed the attribute type as 4 uppercase hex digits.
+        auto append_hex4 = [](std::string& out, uint16_t v) {
+            static const char* kHex = "0123456789ABCDEF";
+            out.push_back(kHex[(v >> 12) & 0xF]);
+            out.push_back(kHex[(v >> 8) & 0xF]);
+            out.push_back(kHex[(v >> 4) & 0xF]);
+            out.push_back(kHex[v & 0xF]);
+        };
+        auto append_decimal = [](std::string& out, uint64_t v) {
+            char digits[20];
+            auto [ptr, ec] = std::to_chars(digits, digits + sizeof(digits), v);
+            out.append(digits, ptr);
+        };
+
         for (const auto& service : accessory->services()) {
             uint16_t svc_iid;
-            
+
             if (iid_manager_) {
                 // Use IIDManager for stable IIDs
                 // Key format: "S:<type>:<aid>"
-                std::ostringstream key;
-                key << "S:" << std::hex << std::uppercase << std::setfill('0') 
-                    << std::setw(4) << (service->type() & 0xFFFF) << ":" << std::dec << aid;
-                svc_iid = iid_manager_->get_or_assign(key.str());
+                std::string key = "S:";
+                append_hex4(key, static_cast<uint16_t>(service->type() & 0xFFFF));
+                key += ":";
+                append_decimal(key, aid);
+                svc_iid = iid_manager_->get_or_assign(key);
             } else {
                 // Fallback to sequential assignment
                 svc_iid = next_iid_++;
             }
             service->set_iid(svc_iid);
-            
+
             for (const auto& characteristic : service->characteristics()) {
                 uint16_t char_iid;
-                
+
                 if (iid_manager_) {
                     // Key format: "C:<char_type>:<svc_type>:<aid>"
-                    std::ostringstream key;
-                    key << "C:" << std::hex << std::uppercase << std::setfill('0')
-                        << std::setw(4) << (characteristic->type() & 0xFFFF) << ":"
-                        << std::setw(4) << (service->type() & 0xFFFF) << ":" << std::dec << aid;
-                    char_iid = iid_manager_->get_or_assign(key.str());
+                    std::string key = "C:";
+                    append_hex4(key, static_cast<uint16_t>(characteristic->type() & 0xFFFF));
+                    key += ":";
+                    append_hex4(key, static_cast<uint16_t>(service->type() & 0xFFFF));
+                    key += ":";
+                    append_decimal(key, aid);
+                    char_iid = iid_manager_->get_or_assign(key);
                 } else {
                     char_iid = next_iid_++;
                 }
                 characteristic->set_iid(char_iid);
             }
         }
-        
+
         if (iid_manager_) {
             iid_manager_->save();
         }
@@ -229,25 +242,5 @@ private:
     IIDManager* iid_manager_ = nullptr;
     uint16_t next_iid_ = 1;  // Fallback when no IIDManager
 };
-
-/**
- * @brief Convert a characteristic Value to its JSON representation.
- *
- * Binary values (TLV8/Data) are base64-encoded; this is the single source of
- * truth for value serialization in event notifications, /accessories, and
- * /characteristics responses.
- */
-inline nlohmann::json value_to_json(const Value& value) {
-    nlohmann::json j;
-    std::visit([&j](auto&& arg) {
-        using T = std::decay_t<decltype(arg)>;
-        if constexpr (std::is_same_v<T, std::vector<uint8_t>>) {
-            j = base64_encode(arg);
-        } else {
-            j = arg;
-        }
-    }, value);
-    return j;
-}
 
 } // namespace hap::core

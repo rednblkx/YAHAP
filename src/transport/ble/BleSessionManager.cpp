@@ -1,4 +1,5 @@
 #include "hap/transport/ble/BleSessionManager.hpp"
+#include "hap/common/Log.hpp"
 #include <algorithm>
 
 namespace hap::transport::ble {
@@ -56,9 +57,7 @@ std::vector<uint16_t> BleSessionManager::check_timeouts() {
             state.last_activity_ms == 0) {
             uint64_t time_since_connect = current_time - state.connection_established_ms;
             if (time_since_connect > kInitialTimeoutMs) {
-                system_->log(platform::System::LogLevel::Warning,
-                    "[BleSessionManager] Initial procedure timeout for connection " + 
-                    std::to_string(conn_id));
+                HAP_LOG_WARN(system_, "[BleSessionManager] Initial procedure timeout for connection ", conn_id);
                 timed_out.push_back(conn_id);
                 continue;
             }
@@ -68,9 +67,7 @@ std::vector<uint16_t> BleSessionManager::check_timeouts() {
         if (state.active && state.procedure_start_ms > 0) {
             uint64_t procedure_duration = current_time - state.procedure_start_ms;
             if (procedure_duration > kProcedureTimeoutMs) {
-                system_->log(platform::System::LogLevel::Warning,
-                    "[BleSessionManager] Procedure timeout for connection " + 
-                    std::to_string(conn_id));
+                HAP_LOG_WARN(system_, "[BleSessionManager] Procedure timeout for connection ", conn_id);
                 timed_out.push_back(conn_id);
                 continue;
             }
@@ -80,9 +77,7 @@ std::vector<uint16_t> BleSessionManager::check_timeouts() {
         if (state.last_activity_ms > 0) {
             uint64_t idle_duration = current_time - state.last_activity_ms;
             if (idle_duration > kIdleTimeoutMs) {
-                system_->log(platform::System::LogLevel::Info,
-                    "[BleSessionManager] Idle timeout for connection " + 
-                    std::to_string(conn_id));
+                HAP_LOG_INFO(system_, "[BleSessionManager] Idle timeout for connection ", conn_id);
                 timed_out.push_back(conn_id);
             }
         }

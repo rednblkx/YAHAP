@@ -2,12 +2,10 @@
 #
 # Two consumption modes:
 #
-# 1. Standalone CMake project (native build, tests): normal CMake flow with
-#    FetchContent for nlohmann/json.
+# 1. Standalone CMake project (native build, tests): normal CMake flow.
 # 2. ESP-IDF component: this repo (or a symlink to it) placed under a
 #    project's components/ directory. idf_component_register() declares the
-#    sources and the nlohmann-json dependency, which the IDF component
-#    manager resolves from the registry.
+#    sources; there are no external dependencies.
 #
 if(NOT ESP_PLATFORM)
     cmake_minimum_required(VERSION 3.20)
@@ -23,8 +21,10 @@ endif()
 
 set(YAHAP_SOURCES
     src/core/AccessoryServer.cpp
+    src/common/JsonValue.cpp
     src/common/TaskScheduler.cpp
     src/core/TLV8.cpp
+    src/core/Characteristic.cpp
     src/core/AttributeDatabaseJSON.cpp
     src/core/CharacteristicSerializer.cpp
     src/core/IIDManager.cpp
@@ -46,14 +46,19 @@ set(YAHAP_SOURCES
     src/types/ServiceTypes.cpp
 )
 
+# Compile-time log level: 0=Debug 1=Info 2=Warning 3=Error. Messages below the
+# level vanish at compile time (format strings, std::string building and all).
+# Default Info keeps pairing/bootstrap visibility; set 0 when debugging.
+# Declared before the ESP-IDF branch so both build modes see it.
+set(YAHAP_LOG_LEVEL "1" CACHE STRING "HAP log level: 0=Debug 1=Info 2=Warning 3=Error")
+
 if(ESP_PLATFORM)
     # Mode 2: proper ESP-IDF component.
     idf_component_register(
         SRCS ${YAHAP_SOURCES}
         INCLUDE_DIRS include
-        REQUIRES nlohmann-json
     )
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE JSON_NOEXCEPTION)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC HAP_LOG_LEVEL=${YAHAP_LOG_LEVEL})
     return()
 endif()
 
@@ -68,15 +73,21 @@ target_include_directories(hap PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
-include(FetchContent)
-FetchContent_Declare(
-    json
-    URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-)
-FetchContent_MakeAvailable(json)
-target_link_libraries(hap PRIVATE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
-target_compile_definitions(hap PRIVATE JSON_NOEXCEPTION)
+# Embedded footprint: emit each function/data item into its own section so the
+# linker can drop unreferenced ones (the library ships far more service/JSON
+# surface than any single accessory uses).
+if(NOT MSVC)
+    target_compile_options(hap PRIVATE -ffunction-sections -fdata-sections)
+    if(APPLE)
+        target_link_options(hap PRIVATE -Wl,-dead_strip)
+    else()
+        target_link_options(hap PRIVATE -Wl,--gc-sections)
+    endif()
+endif()
+
+# Compile-time log level for the native build (the value is declared above the
+# ESP-IDF branch so both modes share it).
+target_compile_definitions(hap PUBLIC HAP_LOG_LEVEL=${YAHAP_LOG_LEVEL})
 
 if(MSVC)
     target_compile_options(hap PRIVATE /W4 /WX)

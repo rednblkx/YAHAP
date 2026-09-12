@@ -1,10 +1,37 @@
 #include "hap/transport/HTTP.hpp"
 #include <charconv>
 #include <algorithm>
-#include <iostream>
-#include <sstream>
 
 namespace hap::transport {
+
+namespace {
+
+// Splits a request line "METHOD /path HTTP/1.1" into its three tokens.
+// Returns the number of tokens found (3 = well-formed).
+size_t split_request_line(const std::string& line, std::string_view parts[3]) {
+    size_t count = 0;
+    size_t pos = 0;
+    while (count < 3 && pos < line.size()) {
+        size_t space = line.find(' ', pos);
+        if (space == std::string::npos) space = line.size();
+        if (space > pos) {
+            parts[count++] = std::string_view(line).substr(pos, space - pos);
+        }
+        pos = space + 1;
+    }
+    return count;
+}
+
+bool parse_method(std::string_view token, Method& out) {
+    if (token == "GET") { out = Method::GET; return true; }
+    if (token == "POST") { out = Method::POST; return true; }
+    if (token == "PUT") { out = Method::PUT; return true; }
+    if (token == "DELETE") { out = Method::DELETE; return true; }
+    if (token == "OPTIONS") { out = Method::OPTIONS; return true; }
+    return false;
+}
+
+} // namespace
 
 HTTPParser::HTTPParser() : state_(State::RequestLine), body_bytes_read_(0), expected_body_length_(0) {}
 
@@ -72,21 +99,16 @@ bool HTTPParser::parse_request_line() {
     buffer_.erase(buffer_.begin(), it + 2);
 
     // Parse "METHOD /path HTTP/1.1"
-    std::istringstream iss(line);
-    std::string method_str, path, version;
-    iss >> method_str >> path >> version;
-
-    if (method_str == "GET") current_request_.method = Method::GET;
-    else if (method_str == "POST") current_request_.method = Method::POST;
-    else if (method_str == "PUT") current_request_.method = Method::PUT;
-    else if (method_str == "DELETE") current_request_.method = Method::DELETE;
-    else if (method_str == "OPTIONS") current_request_.method = Method::OPTIONS;
-    else {
+    std::string_view parts[3];
+    size_t token_count = split_request_line(line, parts);
+    Method method;
+    if (token_count < 2 || !parse_method(parts[0], method)) {
         state_ = State::Error;
         return false;
     }
 
-    current_request_.path = path;
+    current_request_.method = method;
+    current_request_.path.assign(parts[1]);
     state_ = State::Headers;
     return true;
 }
@@ -141,30 +163,32 @@ bool HTTPParser::parse_headers() {
 }
 
 std::vector<uint8_t> HTTPBuilder::build(const Response& response) {
-    std::ostringstream ss;
-    
-    ss << "HTTP/1.1 " << static_cast<int>(response.status);
-    switch (response.status) {
-        case Status::OK: ss << " OK"; break;
-        case Status::NoContent: ss << " No Content"; break;
-        case Status::MultiStatus: ss << " Multi-Status"; break;
-        case Status::BadRequest: ss << " Bad Request"; break;
-        case Status::Unauthorized: ss << " Unauthorized"; break;
-        case Status::NotFound: ss << " Not Found"; break;
-        case Status::UnprocessableEntity: ss << " Unprocessable Entity"; break;
-        case Status::MethodNotAllowed: ss << " Method Not Allowed"; break;
-        case Status::InternalServerError: ss << " Internal Server Error"; break;
-        case Status::ServiceUnavailable: ss << " Service Unavailable"; break;
-    }
-    ss << "\r\n";
+    static constexpr const char* kStatusTexts[] = {
+        " OK", " No Content", " Multi-Status", " Bad Request", " Unauthorized",
+        " Not Found", " Unprocessable Entity", " Method Not Allowed",
+        " Internal Server Error", " Service Unavailable"
+    };
+
+    std::string header_str;
+    header_str.reserve(96 + response.headers.size() * 24 + response.body.size());
+
+    header_str += "HTTP/1.1 ";
+    int status = static_cast<int>(response.status);
+    char digits[8];
+    auto [ptr, ec] = std::to_chars(digits, digits + sizeof(digits), status);
+    header_str.append(digits, ptr);
+    header_str += kStatusTexts[status - static_cast<int>(Status::OK)];
+    header_str += "\r\n";
 
     for (const auto& [key, value] : response.headers) {
-        ss << key << ": " << value << "\r\n";
+        header_str += key;
+        header_str += ": ";
+        header_str += value;
+        header_str += "\r\n";
     }
 
-    ss << "\r\n";
+    header_str += "\r\n";
 
-    std::string header_str = ss.str();
     std::vector<uint8_t> result(header_str.begin(), header_str.end());
     result.insert(result.end(), response.body.begin(), response.body.end());
 

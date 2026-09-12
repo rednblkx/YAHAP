@@ -1,16 +1,16 @@
 #include "hap/transport/PairingEndpoints.hpp"
-#include <nlohmann/json.hpp>
+#include "hap/common/Log.hpp"
+#include "hap/common/JsonValue.hpp"
+#include <algorithm>
 
 namespace hap::transport {
 
 PairingEndpoints::PairingEndpoints(Config config) : config_(std::move(config)) {
-    config_.system->log(platform::System::LogLevel::Info, "[PairingEndpoints] Initialized");
+    HAP_LOG_INFO(config_.system, "[PairingEndpoints] Initialized");
 }
 
 Response PairingEndpoints::handle_pair_setup(const Request& req, ConnectionContext& ctx) {
-    config_.system->log(platform::System::LogLevel::Info, 
-        "[PairingEndpoints] /pair-setup request from connection #" + std::to_string(ctx.connection_id()) + 
-        ", body size: " + std::to_string(req.body.size()));
+    HAP_LOG_INFO(config_.system, "[PairingEndpoints] /pair-setup request from connection #", ctx.connection_id(), ", body size: ", req.body.size());
     
     // Parse request to check what state we're handling
     auto tlvs = core::TLV8::parse(req.body);
@@ -22,8 +22,7 @@ Response PairingEndpoints::handle_pair_setup(const Request& req, ConnectionConte
     // (BLE reconnects with same connection_id=0, so old completed session would be reused)
     auto& session = pair_setup_sessions_[ctx.connection_id()];
     if (!session || is_m1) {
-        config_.system->log(platform::System::LogLevel::Info, 
-            "[PairingEndpoints] Creating new pair-setup session");
+        HAP_LOG_INFO(config_.system, "[PairingEndpoints] Creating new pair-setup session");
         pairing::PairSetup::Config setup_config;
         setup_config.crypto = config_.crypto;
         setup_config.storage = config_.storage;
@@ -41,12 +40,10 @@ Response PairingEndpoints::handle_pair_setup(const Request& req, ConnectionConte
     resp.set_header("Content-Type", "application/pairing+tlv8");
     
     if (response_tlv) {
-        config_.system->log(platform::System::LogLevel::Info, 
-            "[PairingEndpoints] Pair-setup response ready (" + std::to_string(response_tlv->size()) + " bytes)");
+        HAP_LOG_INFO(config_.system, "[PairingEndpoints] Pair-setup response ready (", static_cast<uint64_t>(response_tlv->size()), " bytes)");
         resp.set_body(*response_tlv);
     } else {
-        config_.system->log(platform::System::LogLevel::Error, 
-            "[PairingEndpoints] Pair-setup failed - no response from session");
+        HAP_LOG_ERROR(config_.system, "[PairingEndpoints] Pair-setup failed - no response from session");
         resp = Response{Status::InternalServerError};
         resp.set_body("Pairing error");
     }
@@ -55,9 +52,7 @@ Response PairingEndpoints::handle_pair_setup(const Request& req, ConnectionConte
 }
 
 Response PairingEndpoints::handle_pair_verify(const Request& req, ConnectionContext& ctx) {
-    config_.system->log(platform::System::LogLevel::Info, 
-        "[PairingEndpoints] /pair-verify request from connection #" + std::to_string(ctx.connection_id()) + 
-        ", body size: " + std::to_string(req.body.size()));
+    HAP_LOG_INFO(config_.system, "[PairingEndpoints] /pair-verify request from connection #", ctx.connection_id(), ", body size: ", req.body.size());
     
     // Parse request to check what state we're handling
     auto tlvs = core::TLV8::parse(req.body);
@@ -69,8 +64,7 @@ Response PairingEndpoints::handle_pair_verify(const Request& req, ConnectionCont
     // (BLE reconnects with same connection_id=0, so old verified session would be reused)
     auto& session = pair_verify_sessions_[ctx.connection_id()];
     if (!session || is_m1) {
-        config_.system->log(platform::System::LogLevel::Info, 
-            "[PairingEndpoints] Creating new pair-verify session");
+        HAP_LOG_INFO(config_.system, "[PairingEndpoints] Creating new pair-verify session");
         pairing::PairVerify::Config verify_config;
         verify_config.crypto = config_.crypto;
         verify_config.storage = config_.storage;
@@ -93,15 +87,12 @@ Response PairingEndpoints::handle_pair_verify(const Request& req, ConnectionCont
             // starts only after Pair Verify completes).
             pending_verify_upgrades_[ctx.connection_id()] = std::move(session);
             pair_verify_sessions_.erase(ctx.connection_id());
-            config_.system->log(platform::System::LogLevel::Info,
-                "[PairingEndpoints] Pair-verify succeeded - upgrade pending until response is sent");
+            HAP_LOG_INFO(config_.system, "[PairingEndpoints] Pair-verify succeeded - upgrade pending until response is sent");
         } else {
-            config_.system->log(platform::System::LogLevel::Debug, 
-                "[PairingEndpoints] Pair-verify response sent (" + std::to_string(response_tlv->size()) + " bytes)");
+            HAP_LOG(config_.system, "[PairingEndpoints] Pair-verify response sent (", static_cast<uint64_t>(response_tlv->size()), " bytes)");
         }
     } else {
-        config_.system->log(platform::System::LogLevel::Error, 
-            "[PairingEndpoints] Pair-verify failed - no response from session");
+        HAP_LOG_ERROR(config_.system, "[PairingEndpoints] Pair-verify failed - no response from session");
         resp = Response{Status::InternalServerError};
         resp.set_body("Verification error");
     }
@@ -116,8 +107,7 @@ void PairingEndpoints::complete_pair_verify(ConnectionContext& ctx) {
     }
     auto& session = it->second;
     if (session->is_verified()) {
-        config_.system->log(platform::System::LogLevel::Info,
-            "[PairingEndpoints] Upgrading connection to encrypted after M4 response");
+        HAP_LOG_INFO(config_.system, "[PairingEndpoints] Upgrading connection to encrypted after M4 response");
         ctx.upgrade_to_secure(
             session->get_session_keys(),
             session->get_shared_secret(),
@@ -128,7 +118,7 @@ void PairingEndpoints::complete_pair_verify(ConnectionContext& ctx) {
 
 Response PairingEndpoints::handle_pairings(const Request& req, ConnectionContext& ctx) {
     if (!ctx.is_encrypted()) {
-        config_.system->log(platform::System::LogLevel::Error, "[PairingEndpoints] /pairings request on unencrypted connection");
+        HAP_LOG_ERROR(config_.system, "[PairingEndpoints] /pairings request on unencrypted connection");
         return Response{Status::Unauthorized};
     }
 
@@ -139,8 +129,7 @@ Response PairingEndpoints::handle_pairings(const Request& req, ConnectionContext
     }
     
     pairing::PairingMethod method = static_cast<pairing::PairingMethod>(*method_val);
-    config_.system->log(platform::System::LogLevel::Info, 
-        "[PairingEndpoints] /pairings method: " + std::to_string(static_cast<int>(method)));
+    HAP_LOG_INFO(config_.system, "[PairingEndpoints] /pairings method: ", static_cast<int>(method));
 
     std::vector<core::TLV> response_tlvs;
     response_tlvs.emplace_back(static_cast<uint8_t>(pairing::TLVType::State), static_cast<uint8_t>(pairing::PairingState::M2));
@@ -161,12 +150,15 @@ Response PairingEndpoints::handle_pairings(const Request& req, ConnectionContext
                 
                 // Update list
                 auto list_data = config_.storage->get("pairing_list");
-                nlohmann::json list_json = list_data ? nlohmann::json::parse(list_data->begin(), list_data->end(), nullptr, false) : nlohmann::json::array();
-                if (list_json.is_discarded()) list_json = nlohmann::json::array();
+                bool parse_error = false;
+                hap::common::JsonValue list_json = list_data
+                    ? hap::common::JsonValue::parse(std::string_view(reinterpret_cast<const char*>(list_data->data()), list_data->size()), &parse_error)
+                    : hap::common::JsonValue();
+                if (parse_error || !list_json.is_array()) list_json = hap::common::JsonValue::array();
 
                 bool exists = false;
-                for (const auto& id : list_json) {
-                    if (id == pairing_id) { exists = true; break; }
+                for (const auto& id : list_json.items()) {
+                    if (id.is_string() && id.as_string() == pairing_id) { exists = true; break; }
                 }
                 if (!exists) {
                     list_json.push_back(pairing_id);
@@ -203,15 +195,16 @@ Response PairingEndpoints::handle_pairings(const Request& req, ConnectionContext
                 // Update list
                 auto list_data = config_.storage->get("pairing_list");
                 if (list_data) {
-                    auto list_json = nlohmann::json::parse(list_data->begin(), list_data->end(), nullptr, false);
-                    if (!list_json.is_discarded()) {
-                        for (auto it = list_json.begin(); it != list_json.end(); ) {
-                            if (*it == pairing_id) {
-                                it = list_json.erase(it);
-                            } else {
-                                ++it;
+                    bool parse_error = false;
+                    auto list_json = hap::common::JsonValue::parse(std::string_view(reinterpret_cast<const char*>(list_data->data()), list_data->size()), &parse_error);
+                    if (!parse_error && list_json.is_array()) {
+                        hap::common::JsonValue::Array kept;
+                        for (auto& id : list_json.items()) {
+                            if (!(id.is_string() && id.as_string() == pairing_id)) {
+                                kept.push_back(std::move(id));
                             }
                         }
+                        list_json.items() = std::move(kept);
                         std::string list_str = list_json.dump();
                         config_.storage->set("pairing_list", std::vector<uint8_t>(list_str.begin(), list_str.end()));
                         if (config_.on_pairings_changed) {
@@ -231,11 +224,13 @@ Response PairingEndpoints::handle_pairings(const Request& req, ConnectionContext
         } else {
             auto list_data = config_.storage->get("pairing_list");
             if (list_data) {
-                auto list_json = nlohmann::json::parse(list_data->begin(), list_data->end(), nullptr, false);
-                if (!list_json.is_discarded()) {
+                bool parse_error = false;
+                auto list_json = hap::common::JsonValue::parse(std::string_view(reinterpret_cast<const char*>(list_data->data()), list_data->size()), &parse_error);
+                if (!parse_error && list_json.is_array()) {
                     bool first = true;
-                    for (const auto& id_json : list_json) {
-                        std::string id = id_json.get<std::string>();
+                    for (const auto& id_json : list_json.items()) {
+                        if (!id_json.is_string()) continue;
+                        std::string id = id_json.as_string();
                         auto ltpk_data = config_.storage->get("pairing_" + id);
                         if (ltpk_data && ltpk_data->size() == 32) {
                             if (!first) {
@@ -260,8 +255,7 @@ Response PairingEndpoints::handle_pairings(const Request& req, ConnectionContext
 
 void PairingEndpoints::set_accessory_id(const std::string& new_id) {
     config_.accessory_id = new_id;
-    config_.system->log(platform::System::LogLevel::Info, 
-        "[PairingEndpoints] Accessory ID updated to: " + new_id);
+    HAP_LOG_INFO(config_.system, "[PairingEndpoints] Accessory ID updated to: ", new_id);
 }
 
 void PairingEndpoints::reset() {
@@ -269,8 +263,7 @@ void PairingEndpoints::reset() {
     pair_setup_sessions_.clear();
     pair_verify_sessions_.clear();
     pending_verify_upgrades_.clear();
-    config_.system->log(platform::System::LogLevel::Info, 
-        "[PairingEndpoints] All sessions cleared");
+    HAP_LOG_INFO(config_.system, "[PairingEndpoints] All sessions cleared");
 }
 
 } // namespace hap::transport

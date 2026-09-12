@@ -3,7 +3,6 @@
 #include "hap/transport/HTTP.hpp"
 #include "hap/transport/ConnectionContext.hpp"
 #include "hap/core/AttributeDatabase.hpp"
-#include <nlohmann/json.hpp>
 
 namespace hap::transport {
 

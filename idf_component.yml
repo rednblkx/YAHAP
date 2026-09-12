@@ -1,4 +1,3 @@
 dependencies:
   idf:
     version: '>=5.0.0'
-  johboh/nlohmann-json: '^3.12.0'

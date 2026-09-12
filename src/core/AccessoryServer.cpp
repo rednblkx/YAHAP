@@ -1,6 +1,7 @@
 #include <charconv>
 #include "hap/AccessoryServer.hpp"
 #include "hap/common/TaskScheduler.hpp"
+#include "hap/common/Log.hpp"
 #include "hap/transport/Router.hpp"
 #include "hap/transport/BleTransport.hpp"
 #include "hap/transport/ConnectionContext.hpp"
@@ -8,11 +9,37 @@
 #include "hap/transport/AccessoryEndpoints.hpp"
 #include "hap/core/HAPStatus.hpp"
 #include <map>
-#include <nlohmann/json.hpp>
-#include <iomanip>
-#include <sstream>
 
 namespace hap {
+
+namespace {
+
+// Formats 6 random bytes as "AA:BB:CC:DD:EE:FF".
+std::string format_device_id(const uint8_t* bytes) {
+    static const char* kHex = "0123456789ABCDEF";
+    std::string id;
+    id.reserve(17);
+    for (int i = 0; i < 6; ++i) {
+        if (i > 0) id.push_back(':');
+        id.push_back(kHex[(bytes[i] >> 4) & 0xF]);
+        id.push_back(kHex[bytes[i] & 0xF]);
+    }
+    return id;
+}
+
+// Verbose logging helper: uppercase hex dump of a byte buffer.
+[[maybe_unused]] std::string to_hex_string(const uint8_t* data, size_t len) {
+    static const char* kHex = "0123456789ABCDEF";
+    std::string s;
+    s.reserve(len * 2);
+    for (size_t i = 0; i < len; ++i) {
+        s.push_back(kHex[(data[i] >> 4) & 0xF]);
+        s.push_back(kHex[data[i] & 0xF]);
+    }
+    return s;
+}
+
+} // namespace
 
 class AccessoryServer::Impl {
 public:
@@ -30,27 +57,18 @@ AccessoryServer::AccessoryServer(Config config) : config_(std::move(config)), im
         auto stored_id = config_.storage->get("accessory_id");
         if (stored_id && !stored_id->empty()) {
             config_.accessory_id = std::string(stored_id->begin(), stored_id->end());
-            config_.system->log(platform::System::LogLevel::Info, 
-                "[AccessoryServer] Loaded stored accessory ID: " + config_.accessory_id);
+            HAP_LOG_INFO(config_.system, "[AccessoryServer] Loaded stored accessory ID: ", config_.accessory_id);
         } else {
             // Generate random 6 bytes and format as MAC address
             uint8_t random_id[6];
             config_.system->random_bytes(std::span<uint8_t>(random_id, 6));
-            
-            std::ostringstream oss;
-            oss << std::hex << std::uppercase << std::setfill('0');
-            for (int i = 0; i < 6; ++i) {
-                if (i > 0) oss << ":";
-                oss << std::setw(2) << static_cast<int>(random_id[i]);
-            }
-            config_.accessory_id = oss.str();
-            
+            config_.accessory_id = format_device_id(random_id);
+
             // Store for future boots
             std::vector<uint8_t> id_bytes(config_.accessory_id.begin(), config_.accessory_id.end());
             config_.storage->set("accessory_id", id_bytes);
-            
-            config_.system->log(platform::System::LogLevel::Info, 
-                "[AccessoryServer] Generated new accessory ID: " + config_.accessory_id);
+
+            HAP_LOG_INFO(config_.system, "[AccessoryServer] Generated new accessory ID: ", config_.accessory_id);
         }
     }
     
@@ -62,8 +80,8 @@ AccessoryServer::AccessoryServer(Config config) : config_(std::move(config)), im
     pairing_config.accessory_id = config_.accessory_id;
     pairing_config.setup_code = config_.setup_code;
     pairing_config.on_pairings_changed = [this](const std::string& pairing_id, const std::array<uint8_t, 32>& ltpk, bool is_add) {
-        config_.system->log(platform::System::LogLevel::Info, 
-            "[AccessoryServer] Pairing " + std::string(is_add ? "added" : "removed") + ": " + pairing_id);
+        HAP_LOG_INFO(config_.system,
+            "[AccessoryServer] Pairing ", is_add ? "added" : "removed", ": ", pairing_id);
         
         // Check if all pairings have been removed
         auto pairing_list_data = config_.storage->get("pairing_list");
@@ -137,7 +155,7 @@ AccessoryServer::~AccessoryServer() {
     }
 }
 
-static std::string method_to_string(transport::Method method) {
+[[maybe_unused]] static std::string method_to_string(transport::Method method) {
     switch (method) {
         case transport::Method::GET: return "GET";
         case transport::Method::POST: return "POST";
@@ -151,9 +169,8 @@ static std::string method_to_string(transport::Method method) {
 bool AccessoryServer::add_accessory(std::shared_ptr<core::Accessory> accessory) {
     auto result = database_.add_accessory(accessory);
     if (result != core::ValidationResult::Success) {
-        config_.system->log(platform::System::LogLevel::Error,
-            std::string("[AccessoryServer] add_accessory rejected: ") +
-            core::validation_result_str(result));
+        HAP_LOG_ERROR(config_.system,
+            "[AccessoryServer] add_accessory rejected: ", core::validation_result_str(result));
         return false;
     }
     
@@ -209,21 +226,21 @@ void AccessoryServer::setup_routes() {
         [this](const Request& req, ConnectionContext& ctx) {
             (void)req;
             (void)ctx;
-            
+
             // /identify is only valid if accessory is unpaired
             auto pairing_list_data = config_.storage->get("pairing_list");
             bool is_paired = pairing_list_data && pairing_list_data->size() > 2;
-            
+
             if (is_paired) {
                 // Return 400 Bad Request with HAP status -70401 (InsufficientPrivileges)
-                nlohmann::json error_response;
-                error_response["status"] = core::to_int(core::HAPStatus::InsufficientPrivileges);
+                hap::common::JsonValue error_response = hap::common::JsonValue::object();
+                error_response.set("status", core::to_int(core::HAPStatus::InsufficientPrivileges));
                 transport::Response resp{transport::Status::BadRequest};
                 resp.set_header("Content-Type", "application/hap+json");
                 resp.set_body(error_response.dump());
                 return resp;
             }
-            
+
             if (config_.on_identify) {
                 config_.on_identify();
             }
@@ -248,7 +265,7 @@ void AccessoryServer::setup_routes() {
 }
 
 void AccessoryServer::start() {
-    config_.system->log(platform::System::LogLevel::Info, "HAP Server starting...");
+    HAP_LOG_INFO(config_.system, "HAP Server starting...");
     
     // Check if database structure changed and increment CN if needed
     check_and_update_config_number();
@@ -323,7 +340,7 @@ void AccessoryServer::update_mdns() {
 }
 
 void AccessoryServer::stop() {
-    config_.system->log(platform::System::LogLevel::Info, "HAP Server stopping...");
+    HAP_LOG_INFO(config_.system, "HAP Server stopping...");
     
     if (impl_->ble_transport) {
         impl_->ble_transport->stop();
@@ -349,28 +366,19 @@ void AccessoryServer::reset_pairing_state() {
     for (const char* key : keys_to_clear) {
         config_.storage->remove(key);
     }
-    
-    config_.system->log(platform::System::LogLevel::Info, 
-        "[AccessoryServer] All pairing state cleared");
-    
+
+    HAP_LOG_INFO(config_.system, "[AccessoryServer] All pairing state cleared");
+
     // Generate new accessory ID
     uint8_t random_id[6];
     config_.system->random_bytes(std::span<uint8_t>(random_id, 6));
-    
-    std::ostringstream oss;
-    oss << std::hex << std::uppercase << std::setfill('0');
-    for (int i = 0; i < 6; ++i) {
-        if (i > 0) oss << ":";
-        oss << std::setw(2) << static_cast<int>(random_id[i]);
-    }
-    config_.accessory_id = oss.str();
-    
+    config_.accessory_id = format_device_id(random_id);
+
     // Store new ID
     std::vector<uint8_t> id_bytes(config_.accessory_id.begin(), config_.accessory_id.end());
     config_.storage->set("accessory_id", id_bytes);
-    
-    config_.system->log(platform::System::LogLevel::Info, 
-        "[AccessoryServer] Generated new accessory ID: " + config_.accessory_id);
+
+    HAP_LOG_INFO(config_.system, "[AccessoryServer] Generated new accessory ID: ", config_.accessory_id);
     
     // Reset all in-memory session state
     if (impl_->pairing_endpoints) {
@@ -392,8 +400,7 @@ void AccessoryServer::reset_pairing_state() {
 }
 
 void AccessoryServer::factory_reset() {
-    config_.system->log(platform::System::LogLevel::Warning, 
-        "[AccessoryServer] Factory reset initiated");
+    HAP_LOG_WARN(config_.system, "[AccessoryServer] Factory reset initiated");
     
     reset_pairing_state();
     
@@ -412,7 +419,7 @@ void AccessoryServer::factory_reset() {
         config_.on_pairings_changed(event);
     }
     
-    config_.system->log(platform::System::LogLevel::Info, 
+    HAP_LOG_INFO(config_.system,
         "[AccessoryServer] Factory reset complete - accessory is now unpaired");
 }
 
@@ -423,124 +430,101 @@ void AccessoryServer::tick() {
 }
 
 void AccessoryServer::on_tcp_receive(uint32_t connection_id, std::span<const uint8_t> data) {
-    config_.system->log(platform::System::LogLevel::Debug, 
-        "[AccessoryServer] Received " + std::to_string(data.size()) + " bytes from connection " + std::to_string(connection_id));
-    
+    HAP_LOG(config_.system,
+        "[AccessoryServer] Received ", static_cast<uint64_t>(data.size()), " bytes from connection ", connection_id);
+
     // Get or create connection context
     auto& ctx = impl_->connections[connection_id];
     if (!ctx) {
-        config_.system->log(platform::System::LogLevel::Info, 
-            "[AccessoryServer] New connection #" + std::to_string(connection_id));
+        HAP_LOG_INFO(config_.system, "[AccessoryServer] New connection #", connection_id);
         ctx = std::make_unique<transport::ConnectionContext>(config_.crypto, config_.system, connection_id);
     }
-    
+
     // Get or create HTTP parser
     auto& parser = impl_->parsers[connection_id];
-    
+
     // Decrypt if connection is encrypted
     std::vector<uint8_t> plaintext_data;
     if (ctx->is_encrypted() && ctx->get_secure_session()) {
         if(!ctx->rx_encrypted()) {
             ctx->set_rx_encrypted(true);
         }
-        config_.system->log(platform::System::LogLevel::Debug, 
-            "[AccessoryServer] Decrypting frame for connection #" + std::to_string(connection_id));
         auto decrypted = ctx->get_secure_session()->decrypt_frame(data);
         if (!decrypted) {
-            config_.system->log(platform::System::LogLevel::Warning, 
-                "[AccessoryServer] Decryption failed or incomplete frame for connection #" + std::to_string(connection_id));
+            HAP_LOG_WARN(config_.system,
+                "[AccessoryServer] Decryption failed or incomplete frame for connection #", connection_id);
             return;
         }
         plaintext_data = *decrypted;
-        config_.system->log(platform::System::LogLevel::Debug, 
-            "[AccessoryServer] Decrypted " + std::to_string(plaintext_data.size()) + " bytes");
     } else {
         plaintext_data.assign(data.begin(), data.end());
     }
-    
+
     // Feed to HTTP parser
     if (parser.feed(plaintext_data)) {
         auto request = parser.take_request();
         parser.reset();
-        
-        config_.system->log(platform::System::LogLevel::Debug,
-            "[AccessoryServer] HTTP Request: " + method_to_string(request.method) + " " + request.path);
-        
-        // Log headers
-        for (const auto& [key, value] : request.headers) {
-            config_.system->log(platform::System::LogLevel::Debug, 
-                "[AccessoryServer] Header: " + key + ": " + value);
+
+        HAP_LOG(config_.system,
+            "[AccessoryServer] HTTP Request: ", method_to_string(request.method), " ", request.path);
+
+        // Verbose payload logging (compiled out below HAP_LOG_LEVEL 0)
+        for (const auto& header : request.headers) {
+            (void)header;
+            HAP_LOG(config_.system, "[AccessoryServer] Header: ", header.first, ": ", header.second);
         }
-        
-        // Log body
         if (!request.body.empty()) {
             std::string content_type = request.get_header("Content-Type");
             if (content_type == "application/pairing+tlv8") {
-                std::ostringstream oss;
-                for (uint8_t b : request.body) {
-                    oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b);
-                }
-                config_.system->log(platform::System::LogLevel::Debug, 
-                    "[AccessoryServer] Body (TLV8): " + oss.str());
+                HAP_LOG(config_.system, "[AccessoryServer] Body (TLV8): ",
+                    to_hex_string(request.body.data(), request.body.size()));
             } else {
-                std::string body_str(request.body.begin(), request.body.end());
-                config_.system->log(platform::System::LogLevel::Debug, 
-                    "[AccessoryServer] Body: " + body_str);
+                HAP_LOG(config_.system, "[AccessoryServer] Body: ",
+                    std::string_view(reinterpret_cast<const char*>(request.body.data()), request.body.size()));
             }
         }
-        
+
         // Dispatch to router
         auto response = impl_->router->dispatch(request, *ctx);
-        
+
         transport::Response final_response;
         if (response) {
             final_response = *response;
-            config_.system->log(platform::System::LogLevel::Debug, 
-                "[AccessoryServer] HTTP Response: " + std::to_string(static_cast<int>(final_response.status)));
-            
-            // Log headers
-            for (const auto& [key, value] : final_response.headers) {
-                config_.system->log(platform::System::LogLevel::Debug, 
-                    "[AccessoryServer] Response Header: " + key + ": " + value);
+            HAP_LOG(config_.system,
+                "[AccessoryServer] HTTP Response: ", static_cast<int>(final_response.status));
+
+            // Verbose payload logging (compiled out below HAP_LOG_LEVEL 0)
+            for (const auto& header : final_response.headers) {
+                (void)header;
+                HAP_LOG(config_.system, "[AccessoryServer] Response Header: ", header.first, ": ", header.second);
             }
-            
-            // Log body
             if (!final_response.body.empty()) {
                 auto it = final_response.headers.find("Content-Type");
                 std::string content_type = (it != final_response.headers.end()) ? it->second : "";
-                
+
                 if (content_type == "application/pairing+tlv8") {
-                    std::ostringstream oss;
-                    for (uint8_t b : final_response.body) {
-                        oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b);
-                    }
-                    config_.system->log(platform::System::LogLevel::Debug, 
-                        "[AccessoryServer] Response Body (TLV8): " + oss.str());
+                    HAP_LOG(config_.system, "[AccessoryServer] Response Body (TLV8): ",
+                        to_hex_string(final_response.body.data(), final_response.body.size()));
                 } else {
-                    std::string body_str(final_response.body.begin(), final_response.body.end());
-                    config_.system->log(platform::System::LogLevel::Debug, 
-                        "[AccessoryServer] Response Body: " + body_str);
+                    HAP_LOG(config_.system, "[AccessoryServer] Response Body: ",
+                        std::string_view(reinterpret_cast<const char*>(final_response.body.data()), final_response.body.size()));
                 }
             }
         } else {
-            config_.system->log(platform::System::LogLevel::Warning, 
-                "[AccessoryServer] No route found for: " + request.path);
+            HAP_LOG_WARN(config_.system, "[AccessoryServer] No route found for: ", request.path);
             // 4xx responses must include HAP status code
-            nlohmann::json error_response;
-            error_response["status"] = core::to_int(core::HAPStatus::ResourceDoesNotExist);
+            hap::common::JsonValue error_response = hap::common::JsonValue::object();
+            error_response.set("status", core::to_int(core::HAPStatus::ResourceDoesNotExist));
             final_response = transport::Response{transport::Status::NotFound};
             final_response.set_header("Content-Type", "application/hap+json");
             final_response.set_body(error_response.dump());
         }
-        
+
         // Build HTTP response
         auto response_bytes = transport::HTTPBuilder::build(final_response);
         
         // Encrypt if connection is encrypted
         if (ctx->is_encrypted() && ctx->rx_encrypted()) {
-            config_.system->log(platform::System::LogLevel::Debug, 
-                "[AccessoryServer] Encrypting response (" + std::to_string(response_bytes.size()) + " bytes)");
-            
             size_t offset = 0;
             while (offset < response_bytes.size()) {
                 size_t chunk_size = std::min(response_bytes.size() - offset, (size_t)1024);
@@ -550,35 +534,31 @@ void AccessoryServer::on_tcp_receive(uint32_t connection_id, std::span<const uin
                 offset += chunk_size;
             }
         } else {
-            config_.system->log(platform::System::LogLevel::Debug, 
-                "[AccessoryServer] Sending plaintext response (" + std::to_string(response_bytes.size()) + " bytes)");
             config_.network->tcp_send(connection_id, response_bytes);
         }
-        
+
         // If this exchange was a Pair Verify completion, upgrade the
         // connection to encrypted only AFTER the M4 response has gone out in
         // cleartext (HAP: session security starts after Pair Verify ends).
         impl_->pairing_endpoints->complete_pair_verify(*ctx);
 
         if (ctx->should_close()) {
-            config_.system->log(platform::System::LogLevel::Info, 
-                "[AccessoryServer] Closing connection #" + std::to_string(connection_id) + " as requested");
+            HAP_LOG_INFO(config_.system,
+                "[AccessoryServer] Closing connection #", connection_id, " as requested");
             config_.network->tcp_disconnect(connection_id);
         }
     }
-    
+
     if (pending_connection_cleanup_) {
         pending_connection_cleanup_ = false;
         impl_->connections.clear();
         impl_->parsers.clear();
-        config_.system->log(platform::System::LogLevel::Debug,
-            "[AccessoryServer] Deferred connection cleanup completed");
+        HAP_LOG(config_.system, "[AccessoryServer] Deferred connection cleanup completed");
     }
 }
 
 void AccessoryServer::on_tcp_disconnect(uint32_t connection_id) {
-    config_.system->log(platform::System::LogLevel::Info, 
-        "[AccessoryServer] Connection #" + std::to_string(connection_id) + " disconnected");
+    HAP_LOG_INFO(config_.system, "[AccessoryServer] Connection #", connection_id, " disconnected");
     impl_->connections.erase(connection_id);
     impl_->parsers.erase(connection_id);
 }
@@ -590,35 +570,34 @@ void AccessoryServer::broadcast_event(uint64_t aid, uint64_t iid, const core::Va
     if(!config_.network) {
         return;
     }
-    nlohmann::json body_json;
-    nlohmann::json characteristics = nlohmann::json::array();
-    nlohmann::json char_json;
-    char_json["aid"] = aid;
-    char_json["iid"] = iid;
 
-    char_json["value"] = core::value_to_json(value);
-
-    characteristics.push_back(char_json);
-    body_json["characteristics"] = characteristics;
+    hap::common::JsonValue body_json = hap::common::JsonValue::object();
+    hap::common::JsonValue characteristics = hap::common::JsonValue::array();
+    hap::common::JsonValue char_json = hap::common::JsonValue::object();
+    char_json.set("aid", aid);
+    char_json.set("iid", iid);
+    char_json.set("value", core::value_to_json(value));
+    characteristics.push_back(std::move(char_json));
+    body_json.set("characteristics", std::move(characteristics));
     std::string body = body_json.dump();
 
-    std::ostringstream ss;
-    ss << "EVENT/1.0 200 OK\r\n";
-    ss << "Content-Type: application/hap+json\r\n";
-    ss << "Content-Length: " << body.length() << "\r\n";
-    ss << "\r\n";
-    ss << body;
-    
-    std::string response_str = ss.str();
-    std::vector<uint8_t> response_bytes(response_str.begin(), response_str.end());
+    // EVENT/1.0 has no status text, so the header block is a fixed-size
+    // template with only the length substituted.
+    char header[96];
+    int header_len = snprintf(header, sizeof(header),
+        "EVENT/1.0 200 OK\r\nContent-Type: application/hap+json\r\nContent-Length: %zu\r\n\r\n",
+        body.size());
+    if (header_len < 0) return;
+
+    std::vector<uint8_t> response_bytes;
+    response_bytes.reserve(static_cast<size_t>(header_len) + body.size());
+    response_bytes.insert(response_bytes.end(), header, header + header_len);
+    response_bytes.insert(response_bytes.end(), body.begin(), body.end());
 
     for (auto& [conn_id, ctx] : impl_->connections) {
         if (conn_id == exclude_conn_id) continue;
-        
+
         if (ctx->is_encrypted() && ctx->has_subscription(aid, iid)) {
-            config_.system->log(platform::System::LogLevel::Debug, 
-                "[AccessoryServer] Sending event to connection #" + std::to_string(conn_id));
-            
             size_t offset = 0;
             while (offset < response_bytes.size()) {
                 size_t chunk_size = std::min(response_bytes.size() - offset, (size_t)1024);
@@ -633,26 +612,39 @@ void AccessoryServer::broadcast_event(uint64_t aid, uint64_t iid, const core::Va
 
 void AccessoryServer::check_and_update_config_number() {
     // Build database structure hash
-    std::ostringstream hash_input;
-    
+    std::string hash_input;
+    hash_input.reserve(64);
+
+    auto append_hex = [&hash_input](uint64_t v) {
+        static const char* kHex = "0123456789abcdef";
+        char buf[16];
+        int n = 0;
+        do { buf[n++] = kHex[v & 0xF]; v >>= 4; } while (v > 0);
+        while (n > 0) hash_input.push_back(buf[--n]);
+    };
+
     for (const auto& acc : database_.accessories()) {
-        hash_input << "A" << acc->aid() << ":";
+        hash_input += "A";
+        append_hex(acc->aid());
+        hash_input += ":";
         for (const auto& svc : acc->services()) {
-            hash_input << "S" << std::hex << svc->type() << ":";
+            hash_input += "S";
+            append_hex(svc->type());
+            hash_input += ":";
             for (const auto& ch : svc->characteristics()) {
-                hash_input << "C" << std::hex << ch->type() << ",";
+                hash_input += "C";
+                append_hex(ch->type());
+                hash_input += ",";
             }
         }
     }
-    
-    std::string current_hash_input = hash_input.str();
-    
+
     // Simple DJB2 hash
     uint32_t hash = 5381;
-    for (char c : current_hash_input) {
+    for (char c : hash_input) {
         hash = ((hash << 5) + hash) + static_cast<uint8_t>(c);
     }
-    
+
     std::string current_hash = std::to_string(hash);
     
     // Check for structure change using IIDManager if available, else direct storage
@@ -669,7 +661,7 @@ void AccessoryServer::check_and_update_config_number() {
     }
     
     if (structure_changed) {
-        config_.system->log(platform::System::LogLevel::Info, 
+        HAP_LOG_INFO(config_.system,
             "[AccessoryServer] Database structure changed, incrementing Configuration Number");
         
         auto cn_data = config_.storage->get("config_number");
@@ -695,11 +687,8 @@ void AccessoryServer::check_and_update_config_number() {
             config_.storage->set("db_hash", std::vector<uint8_t>(current_hash.begin(), current_hash.end()));
         }
 
-        config_.system->log(platform::System::LogLevel::Info, 
-            "[AccessoryServer] Configuration Number updated to: " + cn_str);
-    } else {
-        config_.system->log(platform::System::LogLevel::Debug, 
-            "[AccessoryServer] Database structure unchanged, CN remains the same");
+        HAP_LOG_INFO(config_.system,
+            "[AccessoryServer] Configuration Number updated to: ", cn_str);
     }
 }
 

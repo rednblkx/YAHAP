@@ -1,6 +1,6 @@
 #include "hap/core/IIDManager.hpp"
+#include "hap/common/Log.hpp"
 #include <charconv>
-#include <sstream>
 
 namespace hap::core {
 
@@ -29,31 +29,31 @@ void IIDManager::load() {
     auto map_data = storage_->get(kIIDMapKey);
     if (map_data && !map_data->empty()) {
         std::string data_str(map_data->begin(), map_data->end());
-        std::istringstream iss(data_str);
-        std::string line;
-        while (std::getline(iss, line)) {
+        std::string_view data(data_str);
+        size_t pos = 0;
+        while (pos < data.size()) {
+            size_t eol = data.find('\n', pos);
+            if (eol == std::string_view::npos) eol = data.size();
+            std::string_view line = data.substr(pos, eol - pos);
+            pos = eol + 1;
+
             auto sep = line.find('=');
-            if (sep != std::string::npos) {
-                std::string key = line.substr(0, sep);
-                std::string_view value_str(line.data() + sep + 1, line.size() - sep - 1);
+            if (sep != std::string_view::npos) {
+                std::string key(line.substr(0, sep));
+                std::string_view value_str = line.substr(sep + 1);
                 uint16_t iid = 0;
                 auto [ptr, ec] = std::from_chars(value_str.begin(), value_str.end(), iid);
                 if (ec == std::errc() && ptr == value_str.end() && iid != 0) {
                     iid_map_[key] = iid;
                 } else if (system_) {
                     // Corrupted persisted entry: skip rather than throw.
-                    system_->log(platform::System::LogLevel::Warning,
-                        "[IIDManager] Skipping malformed IID entry: " + line);
+                    HAP_LOG_WARN(system_, "[IIDManager] Skipping malformed IID entry: ", key);
                 }
             }
         }
     }
     
-    if (system_) {
-        system_->log(platform::System::LogLevel::Debug, 
-            "[IIDManager] Loaded " + std::to_string(iid_map_.size()) + 
-            " entries, next_iid=" + std::to_string(next_iid_));
-    }
+    HAP_LOG(system_, "[IIDManager] Loaded ", iid_map_.size(), " entries, next_iid=", next_iid_);
 }
 
 void IIDManager::save() {
@@ -67,21 +67,22 @@ void IIDManager::save() {
     storage_->set(kIIDNextKey, next_data);
     
     // Save IID map (simple key=value format)
-    std::ostringstream oss;
+    std::string map_str;
+    map_str.reserve(iid_map_.size() * 16);
     for (const auto& [key, iid] : iid_map_) {
-        oss << key << "=" << iid << "\n";
+        map_str += key;
+        map_str += '=';
+        char digits[6];
+        auto [ptr, ec] = std::to_chars(digits, digits + sizeof(digits), iid);
+        map_str.append(digits, ptr);
+        map_str += '\n';
     }
-    std::string map_str = oss.str();
     std::vector<uint8_t> map_data(map_str.begin(), map_str.end());
     storage_->set(kIIDMapKey, map_data);
     
     dirty_ = false;
     
-    if (system_) {
-        system_->log(platform::System::LogLevel::Debug, 
-            "[IIDManager] Saved " + std::to_string(iid_map_.size()) + 
-            " entries, next_iid=" + std::to_string(next_iid_));
-    }
+    HAP_LOG(system_, "[IIDManager] Saved ", iid_map_.size(), " entries, next_iid=", next_iid_);
 }
 
 uint16_t IIDManager::get_or_assign(const std::string& key) {
@@ -101,10 +102,7 @@ uint16_t IIDManager::get_or_assign(const std::string& key) {
     iid_map_[key] = iid;
     dirty_ = true;
     
-    if (system_) {
-        system_->log(platform::System::LogLevel::Debug, 
-            "[IIDManager] Assigned IID=" + std::to_string(iid) + " for key=" + key);
-    }
+    HAP_LOG(system_, "[IIDManager] Assigned IID=", iid, " for key=", key);
     
     return iid;
 }
@@ -139,10 +137,7 @@ void IIDManager::reset() {
         storage_->remove(kDBHashKey);
     }
     
-    if (system_) {
-        system_->log(platform::System::LogLevel::Info, 
-            "[IIDManager] Reset - all IIDs cleared");
-    }
+    HAP_LOG_INFO(system_, "[IIDManager] Reset - all IIDs cleared");
 }
 
 } // namespace hap::core

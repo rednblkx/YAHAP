@@ -1,7 +1,9 @@
 #include <charconv>
 #include "hap/transport/BleTransport.hpp"
 #include "hap/core/HAPStatus.hpp"
+#include "hap/common/Log.hpp"
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 
 #include "hap/core/TLV8.hpp"
@@ -48,12 +50,13 @@ bool characteristic_requires_encryption(const std::string& uuid) {
 } // namespace
 } // namespace
 
-static std::string to_hex_string(const uint8_t* data, size_t len) {
+[[maybe_unused]] static std::string to_hex_string(const uint8_t* data, size_t len) {
+    static const char* kHex = "0123456789ABCDEF";
     std::string s;
-    char buf[3];
+    s.reserve(len * 2);
     for (size_t i = 0; i < len; ++i) {
-        snprintf(buf, sizeof(buf), "%02X", data[i]);
-        s += buf;
+        s.push_back(kHex[(data[i] >> 4) & 0xF]);
+        s.push_back(kHex[data[i] & 0xF]);
     }
     return s;
 }
@@ -69,7 +72,7 @@ using ble::BleTlvBuilder;
 BleTransport::BleTransport(Config config) : config_(std::move(config)),
     session_manager_(std::make_unique<ble::BleSessionManager>(config_.system)) {
     if (!config_.ble) {
-        if(config_.system) config_.system->log(platform::System::LogLevel::Warning, "[BleTransport] No BLE platform interface provided");
+        if(config_.system) HAP_LOG_WARN(config_.system, "[BleTransport] No BLE platform interface provided");
     }
 }
 
@@ -80,23 +83,20 @@ BleTransport::~BleTransport() {
 void BleTransport::start() {
     if (!config_.ble) return;
 
-    config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Starting...");
+    HAP_LOG_INFO(config_.system, "[BleTransport] Starting...");
 
-    config_.ble->set_connect_callback([this](uint16_t connection_id) {
+    config_.ble->set_connect_callback([this]([[maybe_unused]] uint16_t connection_id) {
         // Connectable advertising stops when the connection is established.
         advertising_active_ = false;
-        config_.system->log(platform::System::LogLevel::Debug,
-            "[BleTransport] Device connected, connection_id=" + std::to_string(connection_id));
+        HAP_LOG(config_.system, "[BleTransport] Device connected, connection_id=", connection_id);
     });
 
     config_.ble->set_disconnect_callback([this](uint16_t connection_id) {
-        config_.system->log(platform::System::LogLevel::Info, 
-            "[BleTransport] Device disconnected, connection_id=" + std::to_string(connection_id));
+        HAP_LOG_INFO(config_.system, "[BleTransport] Device disconnected, connection_id=", connection_id);
         
         session_manager_->remove(connection_id);
         
-        config_.system->log(platform::System::LogLevel::Info, 
-            "[BleTransport] Connection state cleaned up, refreshing advertising");
+        HAP_LOG_INFO(config_.system, "[BleTransport] Connection state cleaned up, refreshing advertising");
         
         update_advertising();
     });
@@ -185,8 +185,7 @@ void BleTransport::add_pairing_characteristic(
     }
     pairing_char_metadata_[char_iid] = meta;
 
-    config_.system->log(platform::System::LogLevel::Info,
-        "[BleTransport] Registered characteristic " + uuid + " IID=" + std::to_string(char_iid));
+    HAP_LOG_INFO(config_.system, "[BleTransport] Registered characteristic ", uuid, " IID=", char_iid);
     svc.characteristics.push_back(std::move(def));
 }
 
@@ -208,7 +207,7 @@ void BleTransport::setup_hap_service() {
     add_pairing_characteristic(svc, svc_iid, svc_type, "BLE:C:0050:0055",
         "00000050-0000-1000-8000-0026BB765291", 0x50, 0x0030); // Pairings: Paired Read|Write
 
-    config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Registering Service...");
+    HAP_LOG_INFO(config_.system, "[BleTransport] Registering Service...");
     config_.ble->register_service(svc);
 
     if (config_.iid_manager) {
@@ -238,13 +237,13 @@ void BleTransport::setup_protocol_info_service() {
 }
 
 void BleTransport::update_advertising() {
-    config_.system->log(platform::System::LogLevel::Debug, "[BleTransport] update_advertising entry");
+    HAP_LOG(config_.system, "[BleTransport] update_advertising entry");
     
     auto setup_id_bytes = config_.storage->get("setup_id");
     std::string setup_id;
     if (setup_id_bytes && setup_id_bytes->size() == 4) {
         setup_id = std::string(setup_id_bytes->begin(), setup_id_bytes->end());
-        config_.system->log(platform::System::LogLevel::Debug, "[BleTransport] Using existing Setup ID: " + setup_id);
+        HAP_LOG(config_.system, "[BleTransport] Using existing Setup ID: ", setup_id);
     } else {
         const char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
         std::array<uint8_t, 4> rand_bytes{};
@@ -253,15 +252,15 @@ void BleTransport::update_advertising() {
             setup_id += charset[rand_bytes[i] % 36];
         }
         config_.storage->set("setup_id", std::vector<uint8_t>(setup_id.begin(), setup_id.end()));
-        config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Generated new Setup ID: " + setup_id);
+        HAP_LOG_INFO(config_.system, "[BleTransport] Generated new Setup ID: ", setup_id);
     }
     
     std::string input = setup_id + config_.accessory_id;
     std::vector<uint8_t> hash_output(64);
-    config_.system->log(platform::System::LogLevel::Debug, "[BleTransport] Calculating Setup Hash for: " + input);
+    HAP_LOG(config_.system, "[BleTransport] Calculating Setup Hash for: ", input);
     
     if (config_.crypto == nullptr) {
-         config_.system->log(platform::System::LogLevel::Error, "[BleTransport] No crypto provider!");
+         HAP_LOG_ERROR(config_.system, "[BleTransport] No crypto provider!");
          return;
     }
 
@@ -279,7 +278,7 @@ void BleTransport::update_advertising() {
     
     std::array<uint8_t, 6> device_id{};
     if (!parse_device_id(config_.accessory_id, device_id)) {
-         config_.system->log(platform::System::LogLevel::Warning, "[BleTransport] Invalid Device ID format: " + config_.accessory_id);
+         HAP_LOG_WARN(config_.system, "[BleTransport] Invalid Device ID format: ", config_.accessory_id);
     }
 
     uint16_t gsn = get_current_gsn();
@@ -304,19 +303,9 @@ void BleTransport::update_advertising() {
     
     adv.local_name = config_.device_name;
 
-    std::string adv_hex;
-    for (auto byte : adv.manufacturer_data) {
-        char buf[4];
-        snprintf(buf, sizeof(buf), "%02X ", byte);
-        adv_hex += buf;
-    }
-    config_.system->log(platform::System::LogLevel::Debug, 
-        "[BleTransport] Advertisement Data (" + std::to_string(adv.manufacturer_data.size()) + " bytes): " + adv_hex);
-    config_.system->log(platform::System::LogLevel::Debug,
-        "[BleTransport] SF=" + std::to_string(status_flags) + 
-        " ACID=" + std::to_string(config_.category_id) +
-        " GSN=" + std::to_string(gsn) +
-        " CN=" + std::to_string(config_number));
+    HAP_LOG(config_.system, "[BleTransport] Advertisement Data (", adv.manufacturer_data.size(), " bytes): ",
+        to_hex_string(adv.manufacturer_data.data(), adv.manufacturer_data.size()));
+    HAP_LOG(config_.system, "[BleTransport] SF=", status_flags, " ACID=", config_.category_id, " GSN=", gsn, " CN=", config_number);
 
     // Only touch the BLE stack when something actually changed AND advertising
     // is already running with the current payload: restarting advertising on
@@ -327,8 +316,7 @@ void BleTransport::update_advertising() {
     if (advertising_active_ && !adv_dirty_ &&
         mfg_sig == last_adv_payload_ &&
         adv.local_name == last_adv_name_) {
-        config_.system->log(platform::System::LogLevel::Debug,
-            "[BleTransport] Advertisement unchanged and active, skipping restart");
+        HAP_LOG(config_.system, "[BleTransport] Advertisement unchanged and active, skipping restart");
         return;
     }
     last_adv_payload_ = mfg_sig;
@@ -342,8 +330,7 @@ void BleTransport::update_advertising() {
 void BleTransport::set_accessory_id(const std::string& new_id) {
     config_.accessory_id = new_id;
     adv_dirty_ = true; // device-id in the payload changes with the accessory ID
-    config_.system->log(platform::System::LogLevel::Info, 
-        "[BleTransport] Accessory ID updated to: " + new_id);
+    HAP_LOG_INFO(config_.system, "[BleTransport] Accessory ID updated to: ", new_id);
 }
 
 void BleTransport::notify_value_changed(uint64_t aid, uint64_t iid, const core::Value& value, uint32_t exclude_conn_id) {
@@ -367,8 +354,7 @@ void BleTransport::increment_gsn() {
     };
     config_.storage->set("gsn", gsn_data);
 
-    config_.system->log(platform::System::LogLevel::Debug,
-        "[BleTransport] GSN incremented to " + std::to_string(gsn));
+    HAP_LOG(config_.system, "[BleTransport] GSN incremented to ", gsn);
 
     update_advertising();
 }
@@ -379,20 +365,19 @@ void BleTransport::check_session_timeouts() {
     for (uint16_t conn_id : timed_out) {
         session_manager_->remove(conn_id);
         config_.ble->disconnect(conn_id);
-        config_.system->log(platform::System::LogLevel::Info,
-            "[BleTransport] Terminated connection " + std::to_string(conn_id) + " due to timeout");
+        HAP_LOG_INFO(config_.system, "[BleTransport] Terminated connection ", conn_id, " due to timeout");
     }
 }
 
 void BleTransport::handle_hap_write_with_id(uint16_t connection_id, std::string uuid, std::span<const uint8_t> data) {
-    config_.system->log(platform::System::LogLevel::Debug, "[BleTransport] Write to Char UUID: " + uuid);
+    HAP_LOG(config_.system, "[BleTransport] Write to Char UUID: ", uuid);
     handle_hap_write(connection_id, uuid, data);
 }
 
 void BleTransport::handle_hap_write(uint16_t connection_id, const std::string& uuid, std::span<const uint8_t> data) {
     if (data.empty()) return;
     
-    config_.system->log(platform::System::LogLevel::Debug, "[BleTransport] Write PDU Fragment (" + std::to_string(data.size()) + " bytes): " + to_hex_string(data.data(), data.size()));
+    HAP_LOG(config_.system, "[BleTransport] Write PDU Fragment (", data.size(), " bytes): ", to_hex_string(data.data(), data.size()));
 
     bool session_is_secured = false;
     auto* session = session_manager_->get_session(connection_id);
@@ -408,16 +393,14 @@ void BleTransport::handle_hap_write(uint16_t connection_id, const std::string& u
     if (session_is_secured && requires_encryption) {
         auto& session_ref = session_manager_->get_or_create(connection_id);
         if (!session_ref.context) {
-            config_.system->log(platform::System::LogLevel::Error,
-                "[BleTransport] Context missing for secured session - disconnecting");
+            HAP_LOG_ERROR(config_.system, "[BleTransport] Context missing for secured session - disconnecting");
             config_.ble->disconnect(connection_id);
             session_manager_->remove(connection_id);
             return;
         }
         auto decrypted = session_ref.context->get_secure_session()->decrypt_ble_pdu(data);
         if (!decrypted) {
-            config_.system->log(platform::System::LogLevel::Error, 
-                "[BleTransport] Decryption failed for connection " + std::to_string(connection_id) + " - disconnecting");
+            HAP_LOG_ERROR(config_.system, "[BleTransport] Decryption failed for connection ", connection_id, " - disconnecting");
             // HAP 6.5.2 (Session Security): on decryption failure the
             // connection must be closed immediately.
             config_.ble->disconnect(connection_id);
@@ -426,9 +409,7 @@ void BleTransport::handle_hap_write(uint16_t connection_id, const std::string& u
         }
         decrypted_data = std::move(*decrypted);
         working_data = decrypted_data;
-        config_.system->log(platform::System::LogLevel::Debug, 
-            "[BleTransport] Decrypted PDU (" + std::to_string(decrypted_data.size()) + " bytes): " + 
-            to_hex_string(decrypted_data.data(), decrypted_data.size()));
+        HAP_LOG(config_.system, "[BleTransport] Decrypted PDU (", decrypted_data.size(), " bytes): ", to_hex_string(decrypted_data.data(), decrypted_data.size()));
     }
     
     if (working_data.empty()) return;
@@ -439,13 +420,13 @@ void BleTransport::handle_hap_write(uint16_t connection_id, const std::string& u
     
     if (!continuation) {
         if (working_data.size() < 3) {
-            config_.system->log(platform::System::LogLevel::Error, "[BleTransport] PDU too short");
+            HAP_LOG_ERROR(config_.system, "[BleTransport] PDU too short");
             return;
         }
         opcode = static_cast<PDUOpcode>(working_data[1]);
         tid = working_data[2];
         
-        config_.system->log(platform::System::LogLevel::Info, "[BleTransport] New Transaction TID=" + std::to_string(tid) + " Opcode=" + std::to_string((int)opcode));
+        HAP_LOG_INFO(config_.system, "[BleTransport] New Transaction TID=", tid, " Opcode=", (int)opcode);
         
         auto& state = session_manager_->get_or_create(connection_id).transaction;
         state.opcode = opcode;
@@ -467,7 +448,7 @@ void BleTransport::handle_hap_write(uint16_t connection_id, const std::string& u
     } else {
         auto& state = session_manager_->get_or_create(connection_id).transaction;
         if (!state.active) {
-             config_.system->log(platform::System::LogLevel::Warning, "[BleTransport] Orphaned continuation fragment!");
+             HAP_LOG_WARN(config_.system, "[BleTransport] Orphaned continuation fragment!");
              return;
         }
         
@@ -476,7 +457,7 @@ void BleTransport::handle_hap_write(uint16_t connection_id, const std::string& u
         if (working_data.size() < 2) return;
         uint16_t cont_tid = working_data[1];
         if (cont_tid != state.transaction_id) {
-            config_.system->log(platform::System::LogLevel::Error, "[BleTransport] TID mismatch in continuation! Expected " + std::to_string(state.transaction_id) + " got " + std::to_string(cont_tid));
+            HAP_LOG_ERROR(config_.system, "[BleTransport] TID mismatch in continuation! Expected ", state.transaction_id, " got ", cont_tid);
             return;
         }
 
@@ -496,15 +477,12 @@ std::vector<uint8_t> BleTransport::handle_hap_read(uint16_t connection_id) {
             uint64_t time_since_write = current_time - state.last_write_ms;
             
             if (time_since_write > 10000) { // 10 seconds
-                config_.system->log(platform::System::LogLevel::Warning,
-                    "[BleTransport] Rejecting GATT Read - >10s since write (Req #12)");
+                HAP_LOG_WARN(config_.system, "[BleTransport] Rejecting GATT Read - >10s since write (Req #12)");
                 return {};
             }
         }
         
-        config_.system->log(platform::System::LogLevel::Info, 
-            "[BleTransport] Handling GATT Read. Returning " + 
-            std::to_string(state.response_buffer.size()) + " bytes");
+        HAP_LOG_INFO(config_.system, "[BleTransport] Handling GATT Read. Returning ", state.response_buffer.size(), " bytes");
         return state.response_buffer;
     }
     return {};
@@ -589,20 +567,14 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         size_t expected_total = 7 + body_length;
         
         if (state.buffer.size() < expected_total) {
-            config_.system->log(platform::System::LogLevel::Debug, 
-                "[BleTransport] Waiting for more fragments: have " + 
-                std::to_string(state.buffer.size()) + " bytes, need " + 
-                std::to_string(expected_total) + " bytes");
+            HAP_LOG(config_.system, "[BleTransport] Waiting for more fragments: have ", state.buffer.size(), " bytes, need ", expected_total, " bytes");
             return;
         }
         
-        config_.system->log(platform::System::LogLevel::Debug, 
-            "[BleTransport] All fragments received: " + 
-            std::to_string(state.buffer.size()) + " bytes (body=" + 
-            std::to_string(body_length) + ")");
+        HAP_LOG(config_.system, "[BleTransport] All fragments received: ", state.buffer.size(), " bytes (body=", body_length, ")");
     }
     
-    uint16_t tid = state.buffer[2];
+    [[maybe_unused]] uint16_t tid = state.buffer[2];
     uint16_t iid = state.buffer[3] | (state.buffer[4] << 8);
 
     // Pair Verify (0x4E) responses complete Pair Verify; the security upgrade
@@ -610,7 +582,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
     const bool is_pair_verify_write =
         state.target_uuid == "0000004E-0000-1000-8000-0026BB765291";
 
-    config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Processing Opcode " + std::to_string((int)opcode) + " TID=" + std::to_string(tid));
+    HAP_LOG_INFO(config_.system, "[BleTransport] Processing Opcode ", (int)opcode, " TID=", tid);
     
     auto find_service = [&](uint16_t target_iid) -> std::shared_ptr<core::Service> {
         return config_.database ? config_.database->find_service_by_iid(target_iid) : nullptr;
@@ -658,8 +630,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
 
         // Per Spec 7.3.4.13: If invalid Service IID, return props=0 and linked=0 length
         if (!found) {
-            config_.system->log(platform::System::LogLevel::Warning, 
-                "[BleTransport] Service Signature Read IID=" + std::to_string(iid) + " Not Found - returning empty");
+            HAP_LOG_WARN(config_.system, "[BleTransport] Service Signature Read IID=", iid, " Not Found - returning empty");
             // Return empty response with props=0
             BleTlvBuilder builder;
             builder.add_uint16(HAPBLEPDUTLVType::ServiceProperties, 0);
@@ -683,9 +654,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                 sig_response.push_back((linked_iid >> 8) & 0xFF);
             }
             
-            config_.system->log(platform::System::LogLevel::Info, 
-                "[BleTransport] Service Signature Read IID=" + std::to_string(iid) + 
-                " Primary=" + std::to_string(is_primary));
+            HAP_LOG_INFO(config_.system, "[BleTransport] Service Signature Read IID=", iid, " Primary=", is_primary);
         }
         
         send_response(connection_id, state.transaction_id, state.target_uuid, 0x00, sig_response);
@@ -699,11 +668,11 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         
         uint8_t status = 0x00;
         if (sig_response.empty()) {
-             config_.system->log(platform::System::LogLevel::Warning, "[BleTransport] Char Signature Read IID=" + std::to_string(iid) + " Not Found");
+             HAP_LOG_WARN(config_.system, "[BleTransport] Char Signature Read IID=", iid, " Not Found");
              status = 0x05; // Invalid Request (Attribute Not Found)
         } else {
-             config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Char Signature Read IID=" + std::to_string(iid) + " Len=" + std::to_string(sig_response.size()));
-             config_.system->log(platform::System::LogLevel::Debug, "[BleTransport] Signature Response: " + to_hex_string(sig_response.data(), sig_response.size()));
+             HAP_LOG_INFO(config_.system, "[BleTransport] Char Signature Read IID=", iid, " Len=", sig_response.size());
+             HAP_LOG(config_.system, "[BleTransport] Signature Response: ", to_hex_string(sig_response.data(), sig_response.size()));
         }
         
         send_response(connection_id, state.transaction_id, state.target_uuid, status, sig_response);
@@ -731,7 +700,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         if (meta_it != pairing_char_metadata_.end()) {
             if (meta_it->second.char_type == 0x4F) { // Pairing Features
                 value_bytes = {0x01, 0x01, 0x00};
-                config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Pairing Features Read: returning 0x00");
+                HAP_LOG_INFO(config_.system, "[BleTransport] Pairing Features Read: returning 0x00");
             } else if (meta_it->second.char_type == 0x37) { // Version
                 // HAP Spec 7.4.4.5.2: Version characteristic returns protocol version string
                 // Format: "major.minor.revision" e.g., "1.1.0"
@@ -740,7 +709,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                 value_bytes.push_back(0x01); // TLV Type: HAP-Param-Value
                 value_bytes.push_back(static_cast<uint8_t>(version.size())); // Length
                 value_bytes.insert(value_bytes.end(), version.begin(), version.end()); // Value
-                config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Version Read: returning " + version);
+                HAP_LOG_INFO(config_.system, "[BleTransport] Version Read: returning ", version);
             } else {
                 status = 0x05; // Invalid Request
             }
@@ -752,8 +721,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                 if (std::holds_alternative<core::HAPStatus>(read_result)) {
                     // Read callback returned error
                     status = 0x02; // HAP Error (map HAPStatus to BLE status)
-                    config_.system->log(platform::System::LogLevel::Warning, 
-                        "[BleTransport] Read IID=" + std::to_string(iid) + " callback returned error");
+                    HAP_LOG_WARN(config_.system, "[BleTransport] Read IID=", iid, " callback returned error");
                 } else {
                     auto raw_value = core::CharacteristicSerializer::to_bytes(std::get<core::Value>(read_result));
                     value_bytes.push_back(0x01); // Type: HAP-Param-Value
@@ -762,7 +730,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                 }
             } else {
                 status = 0x05; // Invalid Request (Attribute Not Found)
-                config_.system->log(platform::System::LogLevel::Warning, "[BleTransport] Read IID=" + std::to_string(iid) + " Not Found");
+                HAP_LOG_WARN(config_.system, "[BleTransport] Read IID=", iid, " Not Found");
             }
         }
         
@@ -804,7 +772,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                  if (val) {
                      inner_body.assign(val->begin(), val->end());
                  } else {
-                     config_.system->log(platform::System::LogLevel::Warning, "[BleTransport] Warning: Pairing Write missing Value TLV wrapper. Using raw body.");
+                     HAP_LOG_WARN(config_.system, "[BleTransport] Warning: Pairing Write missing Value TLV wrapper. Using raw body.");
                      inner_body.assign(body.begin(), body.end());
                  }
              } else {
@@ -826,7 +794,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                 req.path = "/pairings";
                 resp = config_.pairing_endpoints->handle_pairings(req, ctx);
              } else if (type == 0xA5) { // Service Signature
-                config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Software Auth Write - Skipping (Success)");
+                HAP_LOG_INFO(config_.system, "[BleTransport] Software Auth Write - Skipping (Success)");
                 resp = Response{Status::OK}; 
              }
              
@@ -854,15 +822,13 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                  if (value_tlv && !value_tlv->empty()) {
                      core::Value new_value;
                      if (!decode_ble_value(ch->format(), *value_tlv, new_value)) {
-                         config_.system->log(platform::System::LogLevel::Warning,
-                             "[BleTransport] Write IID=" + std::to_string(iid) + " - value too short for format");
+                         HAP_LOG_WARN(config_.system, "[BleTransport] Write IID=", iid, " - value too short for format");
                          send_response(connection_id, state.transaction_id, state.target_uuid, 0x06, {});
                          return;
                      }
                      
                      ch->set_value(new_value, core::EventSource::from_connection(connection_id));
-                     config_.system->log(platform::System::LogLevel::Info, 
-                         "[BleTransport] Write IID=" + std::to_string(iid) + " success");
+                     HAP_LOG_INFO(config_.system, "[BleTransport] Write IID=", iid, " success");
                      
                      // HAP 7.4.6.1: GSN increments once for multiple
                      // characteristic changes while in the connected state
@@ -882,8 +848,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                              if (std::holds_alternative<core::HAPStatus>(response)) {
                                  // WriteResponse callback returned error - still send status
                                  status = 0x02; // HAP Error
-                                 config_.system->log(platform::System::LogLevel::Warning,
-                                     "[BleTransport] WriteResponse IID=" + std::to_string(iid) + " callback returned error");
+                                 HAP_LOG_WARN(config_.system, "[BleTransport] WriteResponse IID=", iid, " callback returned error");
                              } else {
                                  val_to_send = std::get<core::Value>(response);
                              }
@@ -901,9 +866,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                              resp_tlvs.emplace_back(0x01, raw_bytes); // HAP-Param-Value
                              response_body = core::TLV8::encode(resp_tlvs);
                              
-                             config_.system->log(platform::System::LogLevel::Info, 
-                                 "[BleTransport] Write-Response IID=" + std::to_string(iid) + 
-                                 " returning " + std::to_string(response_body.size()) + " bytes");
+                             HAP_LOG_INFO(config_.system, "[BleTransport] Write-Response IID=", iid, " returning ", response_body.size(), " bytes");
                          }
                      }
                      
@@ -911,8 +874,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                      auto char_info = find_char_info(iid);
                      handle_characteristic_change(char_info.accessory_id, iid, new_value, connection_id);
                  } else {
-                     config_.system->log(platform::System::LogLevel::Warning, 
-                         "[BleTransport] Write IID=" + std::to_string(iid) + " - no value TLV found");
+                     HAP_LOG_WARN(config_.system, "[BleTransport] Write IID=", iid, " - no value TLV found");
                      status = 0x06; // Invalid Request
                  }
              } else {
@@ -935,9 +897,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         state.timed_write_body.assign(body.begin(), body.end());
         state.timed_write_iid = iid;
         
-        config_.system->log(platform::System::LogLevel::Info,
-            "[BleTransport] Timed Write stored for IID=" + std::to_string(iid) + 
-            " Body size=" + std::to_string(body.size()));
+        HAP_LOG_INFO(config_.system, "[BleTransport] Timed Write stored for IID=", iid, " Body size=", body.size());
         
         send_response(connection_id, state.transaction_id, state.target_uuid, 0x00, {});
     }
@@ -946,12 +906,10 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         std::vector<uint8_t> response_body;
         
         if (state.timed_write_body.empty()) {
-            config_.system->log(platform::System::LogLevel::Warning,
-                "[BleTransport] Execute Write with no pending timed write");
+            HAP_LOG_WARN(config_.system, "[BleTransport] Execute Write with no pending timed write");
             status = 0x06; // Invalid Request
         } else {
-            config_.system->log(platform::System::LogLevel::Info,
-                "[BleTransport] Executing pending timed write for IID=" + std::to_string(state.timed_write_iid));
+            HAP_LOG_INFO(config_.system, "[BleTransport] Executing pending timed write for IID=", state.timed_write_iid);
             
             auto meta_it = pairing_char_metadata_.find(state.timed_write_iid);
             if (meta_it != pairing_char_metadata_.end()) {
@@ -1017,8 +975,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                     if (value_tlv && !value_tlv->empty()) {
                         core::Value new_value;
                         if (!decode_ble_value(ch->format(), *value_tlv, new_value)) {
-                            config_.system->log(platform::System::LogLevel::Warning,
-                                "[BleTransport] Execute Timed Write IID=" + std::to_string(state.timed_write_iid) + " - value too short for format");
+                            HAP_LOG_WARN(config_.system, "[BleTransport] Execute Timed Write IID=", state.timed_write_iid, " - value too short for format");
                             status = 0x06; // Invalid Request
                             send_response(connection_id, state.transaction_id, state.target_uuid, status, response_body);
                             state.timed_write_body.clear();
@@ -1027,8 +984,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                         }
                         
                         ch->set_value(new_value, core::EventSource::from_connection(connection_id));
-                        config_.system->log(platform::System::LogLevel::Info,
-                            "[BleTransport] Execute Timed Write IID=" + std::to_string(state.timed_write_iid) + " success");
+                        HAP_LOG_INFO(config_.system, "[BleTransport] Execute Timed Write IID=", state.timed_write_iid, " success");
 
                         // Notify subscribers exactly like the direct write path:
                         // a timed write that changes a Notify characteristic must
@@ -1047,13 +1003,11 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                         }
                         
                     } else {
-                        config_.system->log(platform::System::LogLevel::Warning, 
-                            "[BleTransport] Execute Timed Write IID=" + std::to_string(state.timed_write_iid) + " - no value TLV found");
+                        HAP_LOG_WARN(config_.system, "[BleTransport] Execute Timed Write IID=", state.timed_write_iid, " - no value TLV found");
                         status = 0x06; // Invalid Request
                     }
                 } else {
-                    config_.system->log(platform::System::LogLevel::Warning, 
-                        "[BleTransport] Execute Timed Write IID=" + std::to_string(state.timed_write_iid) + " - characteristic not found");
+                    HAP_LOG_WARN(config_.system, "[BleTransport] Execute Timed Write IID=", state.timed_write_iid, " - characteristic not found");
                     status = 0x05; // Not Found
                 }
             }
@@ -1107,10 +1061,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         bool broadcast_enabled = (properties & 0x0001) != 0;
         broadcast_configs_[iid] = BroadcastConfig{iid, broadcast_interval, broadcast_enabled};
         
-        config_.system->log(platform::System::LogLevel::Info,
-            "[BleTransport] Characteristic Configuration IID=" + std::to_string(iid) +
-            " Props=" + std::to_string(properties) + " Interval=" + std::to_string(broadcast_interval) +
-            " BroadcastEnabled=" + std::to_string(broadcast_enabled));
+        HAP_LOG_INFO(config_.system, "[BleTransport] Characteristic Configuration IID=", iid, " Props=", properties, " Interval=", broadcast_interval, " BroadcastEnabled=", broadcast_enabled);
         
         send_response(connection_id, state.transaction_id, state.target_uuid, status, response_body);
     }
@@ -1135,13 +1086,11 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
             //     Info = "Broadcast-Encryption-Key",
             //     L = 32 bytes
             // )
-            config_.system->log(platform::System::LogLevel::Info,
-                "[BleTransport] Protocol Config: Generate Broadcast Encryption Key requested");
+            HAP_LOG_INFO(config_.system, "[BleTransport] Protocol Config: Generate Broadcast Encryption Key requested");
             
             auto* session = session_manager_->get_session(connection_id);
             if (!session || !session->context || !session->context->is_encrypted()) {
-                config_.system->log(platform::System::LogLevel::Error,
-                    "[BleTransport] Protocol Config: Cannot generate key - no secure session");
+                HAP_LOG_ERROR(config_.system, "[BleTransport] Protocol Config: Cannot generate key - no secure session");
                 status = 0x06; // Invalid Request
             } else {
                 auto& ctx = *session->context;
@@ -1150,8 +1099,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                 auto controller_ltpk = config_.storage->get(pairing_key);
                 
                 if (!controller_ltpk || controller_ltpk->size() != 32) {
-                    config_.system->log(platform::System::LogLevel::Error,
-                        "[BleTransport] Protocol Config: Controller LTPK not found for: " + ctx.controller_id());
+                    HAP_LOG_ERROR(config_.system, "[BleTransport] Protocol Config: Controller LTPK not found for: ", ctx.controller_id());
                     status = 0x06; // Invalid Request
                 } else {
                     // Derive broadcast encryption key using HKDF-SHA-512
@@ -1169,9 +1117,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                     
                     resp_tlvs.emplace_back(0x04, std::vector<uint8_t>(broadcast_key.begin(), broadcast_key.end()));
                     
-                    config_.system->log(platform::System::LogLevel::Info,
-                        "[BleTransport] Protocol Config: Generated and stored Broadcast Encryption Key (GSN start=" + 
-                        std::to_string(broadcast_key_gsn_start_) + ")");
+                    HAP_LOG_INFO(config_.system, "[BleTransport] Protocol Config: Generated and stored Broadcast Encryption Key (GSN start=", broadcast_key_gsn_start_, ")");
                 }
             }
         }
@@ -1205,8 +1151,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         
         response_body = core::TLV8::encode(resp_tlvs);
         
-        config_.system->log(platform::System::LogLevel::Info,
-            "[BleTransport] Protocol Configuration completed");
+        HAP_LOG_INFO(config_.system, "[BleTransport] Protocol Configuration completed");
         
         send_response(connection_id, state.transaction_id, state.target_uuid, status, response_body);
     }
@@ -1230,12 +1175,10 @@ void BleTransport::send_response(uint16_t conn_id, uint16_t tid, const std::stri
         auto& ctx = *session_ptr->context;
         auto encrypted = ctx.get_secure_session()->encrypt_ble_pdu(packet);
         if (encrypted.empty()) {
-            config_.system->log(platform::System::LogLevel::Error, 
-                "[BleTransport] Response encryption failed for connection " + std::to_string(conn_id));
+            HAP_LOG_ERROR(config_.system, "[BleTransport] Response encryption failed for connection ", conn_id);
             session_manager_->get_or_create(conn_id).transaction.response_buffer = packet;
         } else {
-            config_.system->log(platform::System::LogLevel::Debug, 
-                "[BleTransport] Encrypted response (" + std::to_string(encrypted.size()) + " bytes)");
+            HAP_LOG(config_.system, "[BleTransport] Encrypted response (", encrypted.size(), " bytes)");
             session_manager_->get_or_create(conn_id).transaction.response_buffer = std::move(encrypted);
         }
     } else {
@@ -1294,8 +1237,7 @@ std::vector<uint8_t> BleTransport::process_signature_read(uint16_t connection_id
              response.insert(response.end(), tlv.begin(), tlv.end());
         }
 
-        config_.system->log(platform::System::LogLevel::Info, 
-            "[BleTransport] Generated signature for special char IID=" + std::to_string(char_iid));
+        HAP_LOG_INFO(config_.system, "[BleTransport] Generated signature for special char IID=", char_iid);
         
         return response;
     }
@@ -1377,9 +1319,15 @@ void BleTransport::register_user_services() {
 void BleTransport::register_services_by_type(uint16_t filter_type) {
     if (!config_.database) return;
     auto type_to_uuid_str = [](uint64_t type) {
-        char buffer[37];
-        snprintf(buffer, sizeof(buffer), "0000%04X-0000-1000-8000-0026BB765291", (unsigned int)(type & 0xFFFF));
-        return std::string(buffer);
+        // HAP base UUID: "0000XXXX-0000-1000-8000-0026BB765291"
+        static const char* kHex = "0123456789ABCDEF";
+        std::string uuid = "0000____-0000-1000-8000-0026BB765291";
+        uint16_t t = static_cast<uint16_t>(type & 0xFFFF);
+        uuid[4] = kHex[(t >> 12) & 0xF];
+        uuid[5] = kHex[(t >> 8) & 0xF];
+        uuid[6] = kHex[(t >> 4) & 0xF];
+        uuid[7] = kHex[t & 0xF];
+        return uuid;
     };
 
     for (const auto& acc : config_.database->accessories()) {
@@ -1511,8 +1459,7 @@ bool BleTransport::is_broadcast_key_valid() {
     }
     
     if (gsn_diff >= 32767) {
-        config_.system->log(platform::System::LogLevel::Warning,
-            "[BleTransport] Broadcast encryption key expired (GSN diff=" + std::to_string(gsn_diff) + ")");
+        HAP_LOG_WARN(config_.system, "[BleTransport] Broadcast encryption key expired (GSN diff=", gsn_diff, ")");
         broadcast_key_valid_ = false;
         return false;
     }
@@ -1523,15 +1470,12 @@ bool BleTransport::is_broadcast_key_valid() {
 void BleTransport::handle_characteristic_change(uint64_t aid, uint64_t iid, 
                                                  const core::Value& value, 
                                                  uint32_t exclude_conn_id) {
-    config_.system->log(platform::System::LogLevel::Debug,
-        "[BleTransport] Characteristic change: AID=" + std::to_string(aid) + 
-        " IID=" + std::to_string(iid));
+    HAP_LOG(config_.system, "[BleTransport] Characteristic change: AID=", aid, " IID=", iid);
     
     // Find the characteristic to check its event properties
     auto ch = config_.database ? config_.database->find_characteristic(aid, iid) : nullptr;
     if (!ch) {
-        config_.system->log(platform::System::LogLevel::Warning,
-            "[BleTransport] Cannot find characteristic for event: IID=" + std::to_string(iid));
+        HAP_LOG_WARN(config_.system, "[BleTransport] Cannot find characteristic for event: IID=", iid);
         return;
     }
     
@@ -1562,8 +1506,7 @@ void BleTransport::handle_characteristic_change(uint64_t aid, uint64_t iid,
     
     auto it = instance_map_.find({aid, iid});
     if (it == instance_map_.end()) {
-        config_.system->log(platform::System::LogLevel::Warning,
-            "[BleTransport] No UUID mapping for IID=" + std::to_string(iid));
+        HAP_LOG_WARN(config_.system, "[BleTransport] No UUID mapping for IID=", iid);
         return;
     }
     std::string uuid = it->second;
@@ -1584,26 +1527,20 @@ void BleTransport::handle_characteristic_change(uint64_t aid, uint64_t iid,
     const bool is_connected = session_manager_->session_count() > 0;
     
     if (is_connected && has_connected_subscribers && supports_connected) {
-        config_.system->log(platform::System::LogLevel::Info,
-            "[BleTransport] Sending Connected Event for IID=" + std::to_string(iid));
+        HAP_LOG_INFO(config_.system, "[BleTransport] Sending Connected Event for IID=", iid);
         send_connected_event(static_cast<uint16_t>(iid));
     }
     else if (!is_connected && supports_broadcast && broadcast_enabled && is_broadcast_key_valid()) {
-        config_.system->log(platform::System::LogLevel::Info,
-            "[BleTransport] Sending Broadcasted Event for IID=" + std::to_string(iid));
+        HAP_LOG_INFO(config_.system, "[BleTransport] Sending Broadcasted Event for IID=", iid);
         send_broadcasted_event(static_cast<uint16_t>(iid), value);
     }
     else if (!is_connected && supports_disconnected) {
-        config_.system->log(platform::System::LogLevel::Info,
-            "[BleTransport] Sending Disconnected Event for IID=" + std::to_string(iid));
+        HAP_LOG_INFO(config_.system, "[BleTransport] Sending Disconnected Event for IID=", iid);
         send_disconnected_event(static_cast<uint16_t>(iid));
     }
     else {
-        config_.system->log(platform::System::LogLevel::Debug,
-            "[BleTransport] No event sent for IID=" + std::to_string(iid) + 
-            " (connected=" + std::to_string(is_connected) +
-            ", has_subs=" + std::to_string(has_connected_subscribers) +
-            ", supports_connected=" + std::to_string(supports_connected) + ")");
+        HAP_LOG(config_.system, "[BleTransport] No event sent for IID=", iid, " (connected=", is_connected, ", has_subs=", has_connected_subscribers +
+            ", supports_connected=", supports_connected, ")");
     }
 }
 
@@ -1620,23 +1557,19 @@ void BleTransport::send_connected_event(uint16_t iid) {
     }
     
     if (uuid.empty()) {
-        config_.system->log(platform::System::LogLevel::Warning,
-            "[BleTransport] Cannot send Connected Event - no UUID for IID=" + std::to_string(iid));
+        HAP_LOG_WARN(config_.system, "[BleTransport] Cannot send Connected Event - no UUID for IID=", iid);
         return;
     }
     
     if (!session_manager_->has_subscribers(uuid)) {
-        config_.system->log(platform::System::LogLevel::Debug,
-            "[BleTransport] No subscribers for Connected Event IID=" + std::to_string(iid));
+        HAP_LOG(config_.system, "[BleTransport] No subscribers for Connected Event IID=", iid);
         return;
     }
     
     std::vector<uint8_t> empty_indication;
     
     for (uint16_t conn_id : session_manager_->get_subscribers(uuid)) {
-        config_.system->log(platform::System::LogLevel::Debug,
-            "[BleTransport] Sending zero-length indication to conn=" + std::to_string(conn_id) + 
-            " for IID=" + std::to_string(iid));
+        HAP_LOG(config_.system, "[BleTransport] Sending zero-length indication to conn=", conn_id, " for IID=", iid);
         
         config_.ble->send_indication(conn_id, uuid, empty_indication);
     }
@@ -1648,16 +1581,14 @@ void BleTransport::send_broadcasted_event(uint16_t iid, const core::Value& value
     // containing the characteristic value.
     
     if (!is_broadcast_key_valid()) {
-        config_.system->log(platform::System::LogLevel::Warning,
-            "[BleTransport] Cannot send Broadcasted Event - no valid broadcast key");
+        HAP_LOG_WARN(config_.system, "[BleTransport] Cannot send Broadcasted Event - no valid broadcast key");
         send_disconnected_event(iid);
         return;
     }
     
     std::vector<uint8_t> encrypted_payload = build_encrypted_advertisement_payload(iid, value);
     if (encrypted_payload.empty()) {
-        config_.system->log(platform::System::LogLevel::Error,
-            "[BleTransport] Failed to build encrypted advertisement payload");
+        HAP_LOG_ERROR(config_.system, "[BleTransport] Failed to build encrypted advertisement payload");
         send_disconnected_event(iid);
         return;
     }
@@ -1682,9 +1613,7 @@ void BleTransport::send_broadcasted_event(uint16_t iid, const core::Value& value
     enc_adv.encrypted_payload = std::move(encrypted_payload);
     enc_adv.gsn = get_current_gsn();
     
-    config_.system->log(platform::System::LogLevel::Info,
-        "[BleTransport] Starting encrypted advertisement for IID=" + std::to_string(iid) +
-        " interval=" + std::to_string(interval_ms) + "ms duration=3000ms");
+    HAP_LOG_INFO(config_.system, "[BleTransport] Starting encrypted advertisement for IID=", iid, " interval=", interval_ms, "ms duration=3000ms");
     
     config_.ble->start_encrypted_advertising(enc_adv, interval_ms, 3000);
 }
@@ -1694,8 +1623,7 @@ void BleTransport::send_disconnected_event(uint16_t iid) {
     // Increment GSN (once per disconnected period until connected) and
     // use 20ms advertising for at least 3 seconds, then revert to normal.
     
-    config_.system->log(platform::System::LogLevel::Debug,
-        "[BleTransport] Disconnected Event for IID=" + std::to_string(iid));
+    HAP_LOG(config_.system, "[BleTransport] Disconnected Event for IID=", iid);
     
     increment_gsn();
     
@@ -1739,10 +1667,7 @@ void BleTransport::send_disconnected_event(uint16_t iid) {
     adv.local_name = config_.device_name;
     
     // Per HAP Spec 7.4.6.3: Use fast interval (20 ms) for 3 seconds, then normal interval
-    config_.system->log(platform::System::LogLevel::Info,
-        "[BleTransport] Starting timed advertising for Disconnected Event (" + 
-        std::to_string(config_.ble->interval_config.fast_interval_ms) + "ms for " +
-        std::to_string(config_.ble->interval_config.fast_duration_ms) + "ms)");
+    HAP_LOG_INFO(config_.system, "[BleTransport] Starting timed advertising for Disconnected Event (", config_.ble->interval_config.fast_interval_ms, "ms for ", config_.ble->interval_config.fast_duration_ms, "ms)");
     config_.ble->start_timed_advertising(
         adv, 
         config_.ble->interval_config.fast_interval_ms,
@@ -1800,8 +1725,7 @@ std::vector<uint8_t> BleTransport::build_encrypted_advertisement_payload(uint16_
     );
     
     if (!success) {
-        config_.system->log(platform::System::LogLevel::Error,
-            "[BleTransport] Broadcast encryption failed");
+        HAP_LOG_ERROR(config_.system, "[BleTransport] Broadcast encryption failed");
         return {};
     }
     
