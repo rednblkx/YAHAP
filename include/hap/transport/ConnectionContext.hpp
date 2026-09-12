@@ -55,11 +55,6 @@ public:
     const std::string& controller_id() const { return controller_id_; }
     bool is_admin() const { return !controller_id_.empty(); } // Currently all paired controllers are admins
 
-    /**
-     * @brief Reset pairing state (e.g., on disconnect).
-     */
-    void reset();
-
     void request_close() { should_close_ = true; }
     bool should_close() const { return should_close_; }
 

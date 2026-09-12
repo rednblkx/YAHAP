@@ -18,7 +18,6 @@
 
 static const char *TAG = "HAP_Main";
 
-static std::shared_ptr<hap::core::Service> *lock_service_ptr = nullptr;
 
 extern "C" void app_main() {
   ESP_LOGI(TAG, "Starting HAP ESP32 IP Example...");
@@ -98,12 +97,10 @@ extern "C" void app_main() {
   // Lock Service
   std::shared_ptr<hap::core::Service> lock_service =
       hap::service::LockMechanismBuilder()
-          .on_lock_change([&](bool locked) {
+          .on_lock_change([](bool locked) {
             ESP_LOGI(TAG, "Lock is %s", locked ? "LOCKED" : "UNLOCKED");
-            lock_service->characteristics()[0]->set_value(locked);
           })
           .build();
-  lock_service_ptr = &lock_service;
   accessory->add_service(lock_service);
 
   // Lock Management Service
@@ -116,7 +113,7 @@ extern "C" void app_main() {
       .build();
   accessory->add_service(lock_mgmt_builder.build());
 
-  server.add_accessory(accessory);
+  ESP_ERROR_CHECK(server.add_accessory(accessory) ? ESP_OK : ESP_FAIL);
 
   ESP_LOGI(TAG, "Starting Server...");
   server.start();

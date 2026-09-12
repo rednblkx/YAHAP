@@ -13,8 +13,11 @@ cmake --build build
 ## Dependencies
 
 - **OpenSSL 3.x**: Cryptographic operations
-- **Avahi** (future): mDNS service discovery
+- **Avahi**: mDNS service discovery (required; `avahi-client` development package)
+- **cereal / fmt**: HomeKey reader-data serialization (pulled in via the
+  DigitalDoorKey submodule)
 - **C++20 compiler**: GCC 10+ or Clang 12+
+- Git submodules: `git submodule update --init`
 
 ## Architecture
 

@@ -2,20 +2,6 @@
 
 namespace hap::transport::ble {
 
-BleTlvBuilder& BleTlvBuilder::add(HAPBLEPDUTLVType type, std::span<const uint8_t> value) {
-    buffer_.push_back(static_cast<uint8_t>(type));
-    buffer_.push_back(static_cast<uint8_t>(value.size()));
-    buffer_.insert(buffer_.end(), value.begin(), value.end());
-    return *this;
-}
-
-BleTlvBuilder& BleTlvBuilder::add_uint8(HAPBLEPDUTLVType type, uint8_t value) {
-    buffer_.push_back(static_cast<uint8_t>(type));
-    buffer_.push_back(1);  // Length
-    buffer_.push_back(value);
-    return *this;
-}
-
 BleTlvBuilder& BleTlvBuilder::add_uint16(HAPBLEPDUTLVType type, uint16_t value) {
     buffer_.push_back(static_cast<uint8_t>(type));
     buffer_.push_back(2);  // Length

@@ -1,4 +1,5 @@
 #include "hap/pairing/PairSetup.hpp"
+#include "hap/pairing/PairingKeys.hpp"
 #include <algorithm>
 #include <nlohmann/json.hpp>
 
@@ -18,18 +19,12 @@ void PairSetup::reset() {
 }
 
 void PairSetup::ensure_long_term_keys() {
-    auto ltsk_data = config_.storage->get("accessory_ltsk");
-    auto ltpk_data = config_.storage->get("accessory_ltpk");
-    
-    if (ltsk_data && ltpk_data && ltsk_data->size() == 64 && ltpk_data->size() == 32) {
-        std::copy_n(ltsk_data->begin(), 64, accessory_ltsk_.begin());
-        std::copy_n(ltpk_data->begin(), 32, accessory_ltpk_.begin());
-    } else {
-        config_.crypto->ed25519_generate_keypair(accessory_ltpk_, accessory_ltsk_);
-        
-        config_.storage->set("accessory_ltpk", accessory_ltpk_);
-        config_.storage->set("accessory_ltsk", accessory_ltsk_);
+    if (pairing::load_accessory_ltk(config_.storage, accessory_ltsk_, accessory_ltpk_)) {
+        return;
     }
+    config_.crypto->ed25519_generate_keypair(accessory_ltpk_, accessory_ltsk_);
+    config_.storage->set(pairing::kAccessoryLTPKKey, accessory_ltpk_);
+    config_.storage->set(pairing::kAccessoryLTSKKey, accessory_ltsk_);
 }
 
 std::optional<std::vector<uint8_t>> PairSetup::handle_request(std::span<const uint8_t> request_tlv) {

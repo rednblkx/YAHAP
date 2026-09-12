@@ -15,14 +15,6 @@ void ConnectionContext::upgrade_to_secure(
     controller_id_ = std::move(controller_id);
 }
 
-void ConnectionContext::reset() {
-    secure_session_.reset();
-    rx_encrypted_ = false;
-    subscriptions_.clear();
-    controller_id_.clear();
-    timed_write_.reset();
-}
-
 void ConnectionContext::add_subscription(uint64_t aid, uint64_t iid) {
     subscriptions_.insert({aid, iid});
 }
@@ -36,10 +28,16 @@ bool ConnectionContext::has_subscription(uint64_t aid, uint64_t iid) const {
 }
 
 void ConnectionContext::prepare_timed_write(uint64_t pid, uint64_t ttl) {
-    if (system_) {
-        uint64_t now = system_->millis();
-        timed_write_ = TimedWriteTransaction{pid, now + ttl};
+    if (!system_) return;
+
+    // Clamp the TTL: the wire value is attacker-controlled and an unclamped
+    // now + ttl could wrap and make the transaction appear valid forever.
+    constexpr uint64_t kMaxTimedWriteTtlMs = 60 * 1000; // HAP allows up to 60s
+    if (ttl == 0 || ttl > kMaxTimedWriteTtlMs) {
+        ttl = kMaxTimedWriteTtlMs;
     }
+    uint64_t now = system_->millis();
+    timed_write_ = TimedWriteTransaction{pid, now + ttl};
 }
 
 bool ConnectionContext::validate_timed_write(uint64_t pid) {

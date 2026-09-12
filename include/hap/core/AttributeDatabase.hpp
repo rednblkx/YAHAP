@@ -3,6 +3,8 @@
 #include "hap/core/Accessory.hpp"
 #include "hap/core/HAPValidation.hpp"
 #include "hap/core/IIDManager.hpp"
+#include <nlohmann/json.hpp>
+#include <type_traits>
 #include <vector>
 #include <memory>
 #include <sstream>
@@ -123,6 +125,59 @@ public:
         return nullptr;
     }
 
+    /**
+     * @brief Find a characteristic anywhere in the database by IID.
+     * IIDs are unique across a bridge, so the first match is authoritative.
+     */
+    std::shared_ptr<Characteristic> find_characteristic_by_iid(uint16_t iid) {
+        for (const auto& acc : accessories_) {
+            for (const auto& svc : acc->services()) {
+                for (const auto& char_ptr : svc->characteristics()) {
+                    if (char_ptr->iid() == iid) {
+                        return char_ptr;
+                    }
+                }
+            }
+        }
+        return nullptr;
+    }
+
+    /**
+     * @brief Find a service by IID (services are also uniquely numbered).
+     */
+    std::shared_ptr<Service> find_service_by_iid(uint16_t iid) {
+        for (const auto& acc : accessories_) {
+            for (const auto& svc : acc->services()) {
+                if (svc->iid() == iid) {
+                    return svc;
+                }
+            }
+        }
+        return nullptr;
+    }
+
+    /**
+     * @brief Locate a characteristic plus its containing service and accessory.
+     */
+    struct CharacteristicLocation {
+        std::shared_ptr<Characteristic> characteristic;
+        std::shared_ptr<Service> service;
+        uint64_t accessory_id = 0;
+    };
+
+    [[nodiscard]] CharacteristicLocation find_characteristic_info(uint16_t iid) {
+        for (const auto& acc : accessories_) {
+            for (const auto& svc : acc->services()) {
+                for (const auto& char_ptr : svc->characteristics()) {
+                    if (char_ptr->iid() == iid) {
+                        return {char_ptr, svc, acc->aid()};
+                    }
+                }
+            }
+        }
+        return {};
+    }
+
     std::string to_json_string() const;
 
 private:
@@ -174,5 +229,25 @@ private:
     IIDManager* iid_manager_ = nullptr;
     uint16_t next_iid_ = 1;  // Fallback when no IIDManager
 };
+
+/**
+ * @brief Convert a characteristic Value to its JSON representation.
+ *
+ * Binary values (TLV8/Data) are base64-encoded; this is the single source of
+ * truth for value serialization in event notifications, /accessories, and
+ * /characteristics responses.
+ */
+inline nlohmann::json value_to_json(const Value& value) {
+    nlohmann::json j;
+    std::visit([&j](auto&& arg) {
+        using T = std::decay_t<decltype(arg)>;
+        if constexpr (std::is_same_v<T, std::vector<uint8_t>>) {
+            j = base64_encode(arg);
+        } else {
+            j = arg;
+        }
+    }, value);
+    return j;
+}
 
 } // namespace hap::core

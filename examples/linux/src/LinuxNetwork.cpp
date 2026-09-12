@@ -6,7 +6,8 @@
 #include <thread>
 #include <map>
 #include <mutex>
-#include <cassert>
+#include <cerrno>
+#include <cstring>
 
 namespace linux_pal {
 
@@ -34,16 +35,30 @@ LinuxNetwork::~LinuxNetwork() {
         threaded_poll_ = nullptr;
     }
     
+    // Stop accepting first, then join client handlers before closing their
+    // sockets: a handler blocked in read() must not observe a closed fd.
+    if (accept_thread_.joinable()) {
+        accept_thread_.join();
+    }
+
+    {
+        std::vector<std::thread> threads;
+        {
+            std::lock_guard<std::mutex> tlock(client_threads_mutex_);
+            threads = std::move(client_threads_);
+            client_threads_.clear();
+        }
+        for (auto& t : threads) {
+            if (t.joinable()) t.join();
+        }
+    }
+
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         for (auto& [id, fd] : g_connections) {
             close(fd);
         }
         g_connections.clear();
-    }
-    
-    if (accept_thread_.joinable()) {
-        accept_thread_.join();
     }
 }
 
@@ -273,6 +288,8 @@ void LinuxNetwork::accept_loop(uint16_t port) {
     
     int opt = 1;
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
+    int v6only = 0; // dual-stack: accept IPv4-mapped connections too
+    setsockopt(server_fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
     
     sockaddr_in6 addr{};
     addr.sin6_family = AF_INET6;
@@ -307,9 +324,14 @@ void LinuxNetwork::accept_loop(uint16_t port) {
             g_connections[conn_id] = new_socket;
         }
         
-        std::thread([this, new_socket, conn_id]() {
-            this->client_handler(new_socket, conn_id);
-        }).detach();
+        {
+            // Tracked (not detached) so the destructor can join them before
+            // tearing down the callbacks they use.
+            std::lock_guard<std::mutex> tlock(client_threads_mutex_);
+            client_threads_.emplace_back([this, new_socket, conn_id]() {
+                this->client_handler(new_socket, conn_id);
+            });
+        }
     }
     
     close(server_fd);
@@ -319,7 +341,8 @@ void LinuxNetwork::client_handler(int client_fd, uint32_t connection_id) {
     uint8_t buffer[1024];
     
     while (running_) {
-        ssize_t valread = read(client_fd, buffer, 1024);
+        ssize_t valread = read(client_fd, buffer, sizeof(buffer));
+        if (valread < 0 && errno == EINTR) continue;
         if (valread > 0) {
             if (receive_callback_) {
                 receive_callback_(connection_id, std::span<const uint8_t>(buffer, valread));
@@ -350,8 +373,17 @@ void LinuxNetwork::tcp_send(uint32_t connection_id, std::span<const uint8_t> dat
         }
     }
     
-    if (fd != -1) {
-        send(fd, data.data(), data.size(), 0);
+    if (fd == -1) return;
+
+    size_t total_sent = 0;
+    while (total_sent < data.size()) {
+        ssize_t sent = ::send(fd, data.data() + total_sent, data.size() - total_sent, MSG_NOSIGNAL);
+        if (sent < 0) {
+            if (errno == EINTR) continue;
+            perror("send failed");
+            break;
+        }
+        total_sent += static_cast<size_t>(sent);
     }
 }
 
@@ -364,8 +396,11 @@ void LinuxNetwork::tcp_disconnect(uint32_t connection_id) {
             g_connections.erase(connection_id);
         }
     }
-    
+
     if (fd != -1) {
+        // Unblock the client handler's read() before closing so the handler
+        // thread exits and joins cleanly.
+        shutdown(fd, SHUT_RDWR);
         close(fd);
     }
 }

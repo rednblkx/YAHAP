@@ -1,3 +1,4 @@
+#include <charconv>
 #include "hap/transport/AccessoryEndpoints.hpp"
 #include "hap/core/HAPStatus.hpp"
 #include <sstream>
@@ -103,17 +104,7 @@ Response AccessoryEndpoints::handle_get_characteristics(const Request& req, Conn
             auto value = std::get<core::Value>(read_result);
             char_json["status"] = core::to_int(core::HAPStatus::Success);
             
-            std::visit([&char_json](auto&& arg) {
-                using T = std::decay_t<decltype(arg)>;
-                if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, uint8_t> || 
-                             std::is_same_v<T, uint16_t> || std::is_same_v<T, uint32_t> || 
-                             std::is_same_v<T, uint64_t> || std::is_same_v<T, int32_t> || 
-                             std::is_same_v<T, float> || std::is_same_v<T, std::string>) {
-                    char_json["value"] = arg;
-                } else {
-                    char_json["value"] = nullptr;
-                }
-            }, value);
+            char_json["value"] = core::value_to_json(value);
             
             characteristics.push_back(char_json);
         } else {
@@ -364,19 +355,7 @@ Response AccessoryEndpoints::handle_put_characteristics(const Request& req, Conn
                     }
                     
                     if (status == core::to_int(core::HAPStatus::Success)) {
-                        std::visit([&char_json](auto&& arg) {
-                            using T = std::decay_t<decltype(arg)>;
-                            if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, uint8_t> || 
-                                            std::is_same_v<T, uint16_t> || std::is_same_v<T, uint32_t> || 
-                                            std::is_same_v<T, uint64_t> || std::is_same_v<T, int32_t> || 
-                                            std::is_same_v<T, float> || std::is_same_v<T, std::string>) {
-                                char_json["value"] = arg;
-                            } else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) {
-                                char_json["value"] = core::base64_encode(arg);
-                            } else {
-                                char_json["value"] = nullptr;
-                            }
-                        }, value_to_send);
+                        char_json["value"] = core::value_to_json(value_to_send);
                     }
                     // Update the status in char_json in case it changed
                     char_json["status"] = status;
@@ -430,9 +409,15 @@ std::vector<std::pair<uint64_t, uint64_t>> AccessoryEndpoints::parse_characteris
     while (std::getline(iss, token, ',')) {
         size_t dot_pos = token.find('.');
         if (dot_pos != std::string::npos) {
-            uint64_t aid = std::stoull(token.substr(0, dot_pos));
-            uint64_t iid = std::stoull(token.substr(dot_pos + 1));
-            result.emplace_back(aid, iid);
+            uint64_t aid = 0, iid = 0;
+            std::string_view aid_sv(token.data(), dot_pos);
+            std::string_view iid_sv(token.data() + dot_pos + 1, token.size() - dot_pos - 1);
+            auto [p1, ec1] = std::from_chars(aid_sv.begin(), aid_sv.end(), aid);
+            auto [p2, ec2] = std::from_chars(iid_sv.begin(), iid_sv.end(), iid);
+            if (ec1 == std::errc() && p1 == aid_sv.end() &&
+                ec2 == std::errc() && p2 == iid_sv.end()) {
+                result.emplace_back(aid, iid);
+            }
         }
     }
     

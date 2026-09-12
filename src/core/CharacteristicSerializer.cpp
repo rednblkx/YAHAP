@@ -66,18 +66,18 @@ common::Result<Value> CharacteristicSerializer::from_bytes(std::span<const uint8
             if (data.size() < 2) {
                 return common::Result<Value>::err(common::ErrorCode::BufferTooSmall);
             }
-            return common::Result<Value>::ok(
-                static_cast<uint16_t>(data[0]) | (static_cast<uint16_t>(data[1]) << 8));
+            return common::Result<Value>::ok(static_cast<uint16_t>(
+                static_cast<uint16_t>(data[0]) | (static_cast<uint16_t>(data[1]) << 8)));
             
         case Format::UInt32:
             if (data.size() < 4) {
                 return common::Result<Value>::err(common::ErrorCode::BufferTooSmall);
             }
-            return common::Result<Value>::ok(
+            return common::Result<Value>::ok(static_cast<uint32_t>(
                 static_cast<uint32_t>(data[0]) |
                 (static_cast<uint32_t>(data[1]) << 8) |
                 (static_cast<uint32_t>(data[2]) << 16) |
-                (static_cast<uint32_t>(data[3]) << 24));
+                (static_cast<uint32_t>(data[3]) << 24)));
             
         case Format::UInt64:
             if (data.size() < 8) {

@@ -1,3 +1,4 @@
+#include <charconv>
 #include "hap/AccessoryServer.hpp"
 #include "hap/common/TaskScheduler.hpp"
 #include "hap/transport/Router.hpp"
@@ -12,6 +13,10 @@
 #include <sstream>
 
 namespace hap {
+
+/// Sentinel for broadcast_event: connection IDs are 1-based, so 0 excludes
+/// nothing (matches the documented default of `exclude_conn_id = 0`).
+static constexpr uint32_t kNoConnectionExclusion = 0;
 
 class AccessoryServer::Impl {
 public:
@@ -104,7 +109,6 @@ AccessoryServer::AccessoryServer(Config config) : config_(std::move(config)), im
         ble_config.pairing_endpoints = impl_->pairing_endpoints.get();
         ble_config.system = config_.system;
         ble_config.storage = config_.storage;
-        ble_config.scheduler = scheduler_.get();
         ble_config.accessory_id = config_.accessory_id;
         ble_config.device_name = config_.device_name;
         ble_config.category_id = static_cast<uint16_t>(config_.category_id);
@@ -122,15 +126,20 @@ AccessoryServer::AccessoryServer(Config config) : config_(std::move(config)), im
     // Initialize router
     impl_->router = std::make_unique<transport::Router>();
     setup_routes();
-    
-    // Set up deferred callback execution for characteristic value changes
-    // This avoids stack overflow on platforms with limited callback stack (e.g., ESP32 GATT)
-    core::Characteristic::set_dispatcher([this](std::function<void()> work) {
-        scheduler_->schedule_once(0, std::move(work));
-    });
 }
 
-AccessoryServer::~AccessoryServer() = default;
+AccessoryServer::~AccessoryServer() {
+    // Detach characteristics from this server's scheduler before the
+    // scheduler dies; without this, callbacks would dispatch into freed state.
+    for (const auto& acc : database_.accessories()) {
+        for (const auto& svc : acc->services()) {
+            for (const auto& ch : svc->characteristics()) {
+                ch->clear_dispatcher();
+                ch->set_event_callback(nullptr);
+            }
+        }
+    }
+}
 
 static std::string method_to_string(transport::Method method) {
     switch (method) {
@@ -143,8 +152,14 @@ static std::string method_to_string(transport::Method method) {
     }
 }
 
-void AccessoryServer::add_accessory(std::shared_ptr<core::Accessory> accessory) {
-    database_.add_accessory(accessory);
+bool AccessoryServer::add_accessory(std::shared_ptr<core::Accessory> accessory) {
+    auto result = database_.add_accessory(accessory);
+    if (result != core::ValidationResult::Success) {
+        config_.system->log(platform::System::LogLevel::Error,
+            std::string("[AccessoryServer] add_accessory rejected: ") +
+            core::validation_result_str(result));
+        return false;
+    }
     
     // Register event callbacks
     uint64_t aid = accessory->aid();
@@ -152,20 +167,22 @@ void AccessoryServer::add_accessory(std::shared_ptr<core::Accessory> accessory) 
         for (const auto& characteristic : service->characteristics()) {
             if (core::has_permission(characteristic->permissions(), core::Permission::Notify)) {
                 auto ch_ptr = characteristic.get();
+                characteristic->set_dispatcher([this](std::function<void()> work) {
+                    scheduler_->schedule_once(0, std::move(work));
+                });
                 characteristic->set_event_callback([this, aid, ch_ptr](const core::Value& value, const core::EventSource& source) {
                     uint64_t iid = ch_ptr->iid();
-                    uint32_t exclude_id = UINT32_MAX;
-                    if (source.type == core::EventSource::Type::Connection) {
-                        exclude_id = source.id;
-                    }
-                    
-                    if(source.type != core::EventSource::Type::Connection) {
-                      broadcast_event(aid, iid, value, exclude_id);
-                    }
+                    // NotifyChange events carry no connection (id = 0), so
+                    // every subscribed controller is notified — including
+                    // the one whose write triggered a propagated state
+                    // change. Connection-source writes never reach this
+                    // callback (the write response confirms them).
+                    broadcast_event(aid, iid, value, source.id);
                 });
             }
         }
     }
+    return true;
 }
 
 void AccessoryServer::setup_routes() {
@@ -197,7 +214,7 @@ void AccessoryServer::setup_routes() {
             (void)req;
             (void)ctx;
             
-            // HAP Spec 6.7.7: /identify is only valid if accessory is unpaired
+            // /identify is only valid if accessory is unpaired
             auto pairing_list_data = config_.storage->get("pairing_list");
             bool is_paired = pairing_list_data && pairing_list_data->size() > 2;
             
@@ -512,7 +529,7 @@ void AccessoryServer::on_tcp_receive(uint32_t connection_id, std::span<const uin
         } else {
             config_.system->log(platform::System::LogLevel::Warning, 
                 "[AccessoryServer] No route found for: " + request.path);
-            // HAP Spec 6.7.1.4: 4xx responses must include HAP status code
+            // 4xx responses must include HAP status code
             nlohmann::json error_response;
             error_response["status"] = core::to_int(core::HAPStatus::ResourceDoesNotExist);
             final_response = transport::Response{transport::Status::NotFound};
@@ -542,6 +559,11 @@ void AccessoryServer::on_tcp_receive(uint32_t connection_id, std::span<const uin
             config_.network->tcp_send(connection_id, response_bytes);
         }
         
+        // If this exchange was a Pair Verify completion, upgrade the
+        // connection to encrypted only AFTER the M4 response has gone out in
+        // cleartext (HAP: session security starts after Pair Verify ends).
+        impl_->pairing_endpoints->complete_pair_verify(*ctx);
+
         if (ctx->should_close()) {
             config_.system->log(platform::System::LogLevel::Info, 
                 "[AccessoryServer] Closing connection #" + std::to_string(connection_id) + " as requested");
@@ -578,20 +600,7 @@ void AccessoryServer::broadcast_event(uint64_t aid, uint64_t iid, const core::Va
     char_json["aid"] = aid;
     char_json["iid"] = iid;
 
-    std::visit([&char_json](auto&& arg) {
-        using T = std::decay_t<decltype(arg)>;
-        if constexpr (std::is_same_v<T, bool>) {
-            char_json["value"] = arg;
-        } else if constexpr (std::is_same_v<T, uint8_t> || std::is_same_v<T, uint16_t> || 
-                             std::is_same_v<T, uint32_t> || std::is_same_v<T, uint64_t> || 
-                             std::is_same_v<T, int32_t> || std::is_same_v<T, float>) {
-            char_json["value"] = arg;
-        } else if constexpr (std::is_same_v<T, std::string>) {
-            char_json["value"] = arg;
-        } else {
-            char_json["value"] = nullptr;
-        }
-    }, value);
+    char_json["value"] = core::value_to_json(value);
 
     characteristics.push_back(char_json);
     body_json["characteristics"] = characteristics;
@@ -670,7 +679,12 @@ void AccessoryServer::check_and_update_config_number() {
         auto cn_data = config_.storage->get("config_number");
         uint16_t cn = 0;
         if (cn_data && !cn_data->empty()) {
-            cn = static_cast<uint16_t>(std::stoi(std::string(cn_data->begin(), cn_data->end())));
+            std::string_view cn_sv(reinterpret_cast<const char*>(cn_data->data()), cn_data->size());
+            uint32_t parsed = 0;
+            auto [ptr, ec] = std::from_chars(cn_sv.begin(), cn_sv.end(), parsed);
+            if (ec == std::errc() && ptr == cn_sv.end() && parsed <= 65535) {
+                cn = static_cast<uint16_t>(parsed);
+            }
         }
         
         cn = (cn >= 65535) ? 1 : cn + 1;

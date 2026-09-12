@@ -71,7 +71,8 @@ AccessoryInformationBuilder& AccessoryInformationBuilder::hardware_revision(std:
 
 AccessoryInformationBuilder& AccessoryInformationBuilder::on_identify(std::function<void()> callback) {
     identify_char_->set_write_callback([callback](const Value& v) -> WriteResponse {
-        bool identify = std::get<bool>(v);
+        auto* identify_p = std::get_if<bool>(&v);
+        bool identify = identify_p ? *identify_p : false;
         if (identify && callback) {
             callback();
         }
@@ -80,12 +81,12 @@ AccessoryInformationBuilder& AccessoryInformationBuilder::on_identify(std::funct
     return *this;
 }
 
-AccessoryInformationBuilder& AccessoryInformationBuilder::hardwareFinish(std::vector<uint8_t> value) {
-    if (!hardwareFinish_char_) {
-        hardwareFinish_char_ = chr::HardwareFinish();
-        add_characteristic(hardwareFinish_char_);
+AccessoryInformationBuilder& AccessoryInformationBuilder::hardware_finish(std::vector<uint8_t> value) {
+    if (!hardware_finish_char_) {
+        hardware_finish_char_ = chr::HardwareFinish();
+        add_characteristic(hardware_finish_char_);
     }
-    hardwareFinish_char_->set_value(std::move(value));
+    hardware_finish_char_->set_value(std::move(value));
     return *this;
 }
 
@@ -157,7 +158,8 @@ LightBulbBuilder& LightBulbBuilder::with_name(std::string name) {
 
 LightBulbBuilder& LightBulbBuilder::on_change(std::function<void(bool on)> callback) {
     on_char_->set_write_callback([callback](const Value& v) -> WriteResponse {
-        bool on = std::get<bool>(v);
+        auto* on_p = std::get_if<bool>(&v);
+        bool on = on_p ? *on_p : false;
         if (callback) callback(on);
         return std::nullopt; // Success
     });
@@ -169,7 +171,8 @@ LightBulbBuilder& LightBulbBuilder::on_brightness_change(std::function<void(int 
         with_brightness();
     }
     brightness_char_->set_write_callback([callback](const Value& v) -> WriteResponse {
-        int brightness = std::get<int32_t>(v);
+        auto* brightness_p = std::get_if<int32_t>(&v);
+        int brightness = brightness_p ? *brightness_p : 0;
         if (callback) callback(brightness);
         return std::nullopt; // Success
     });
@@ -199,7 +202,8 @@ SwitchBuilder& SwitchBuilder::with_name(std::string name) {
 
 SwitchBuilder& SwitchBuilder::on_change(std::function<void(bool on)> callback) {
     on_char_->set_write_callback([callback](const Value& v) -> WriteResponse {
-        bool on = std::get<bool>(v);
+        auto* on_p = std::get_if<bool>(&v);
+        bool on = on_p ? *on_p : false;
         if (callback) callback(on);
         return std::nullopt; // Success
     });
@@ -233,7 +237,8 @@ OutletBuilder& OutletBuilder::with_name(std::string name) {
 
 OutletBuilder& OutletBuilder::on_change(std::function<void(bool on)> callback) {
     on_char_->set_write_callback([callback](const Value& v) -> WriteResponse {
-        bool on = std::get<bool>(v);
+        auto* on_p = std::get_if<bool>(&v);
+        bool on = on_p ? *on_p : false;
         if (callback) callback(on);
         return std::nullopt; // Success
     });
@@ -483,9 +488,14 @@ LockMechanismBuilder& LockMechanismBuilder::with_name(std::string name) {
 }
 
 LockMechanismBuilder& LockMechanismBuilder::on_lock_change(std::function<void(bool locked)> callback) {
-    lock_target_state_->set_write_callback([callback](const Value& v) -> WriteResponse {
-        uint8_t target = std::get<uint8_t>(v);
+    auto current_state = lock_current_state_;
+    auto target_state = lock_target_state_;
+    lock_target_state_->set_write_callback([current_state, target_state, callback](const Value& v) -> WriteResponse {
+        auto* target_p = std::get_if<uint8_t>(&v);
+        uint8_t target = target_p ? *target_p : 0;
         if (callback) callback(target == 1); // 1 = Secured
+
+        current_state->set_value(target, EventSource{});
         return std::nullopt; // Success
     });
     return *this;
@@ -513,8 +523,9 @@ NFCAccessBuilder::NFCAccessBuilder() {
 
 NFCAccessBuilder& NFCAccessBuilder::on_control_point(std::function<std::optional<Value>(const std::vector<uint8_t>& tlv)> callback) {
   nfc_access_control_point_->set_write_response_callback([callback](const core::Value& input) -> HAPResponse<Value> {
-    if (callback) {
-        auto result = callback(std::get<std::vector<uint8_t>>(input));
+    auto* tlv_p = std::get_if<std::vector<uint8_t>>(&input);
+    if (callback && tlv_p) {
+        auto result = callback(*tlv_p);
         if (result) return *result;
     }
     // Return a default empty TLV on success if no callback or callback returns nullopt
@@ -580,8 +591,10 @@ LockManagementBuilder& LockManagementBuilder::with_logs() {
 LockManagementBuilder& LockManagementBuilder::on_control_point(std::function<void(const std::vector<uint8_t>& tlv)> callback) {
     lock_control_point_->set_write_callback([callback](const Value& v) -> WriteResponse {
         if (callback) {
-            auto& tlv_data = std::get<std::vector<uint8_t>>(v);
-            callback(tlv_data);
+            auto* tlv_p = std::get_if<std::vector<uint8_t>>(&v);
+            if (tlv_p) {
+                callback(*tlv_p);
+            }
         }
         return std::nullopt; // Success
     });
@@ -635,7 +648,8 @@ FanBuilder& FanBuilder::with_swing_mode() {
 
 FanBuilder& FanBuilder::on_active_change(std::function<void(bool active)> callback) {
     active_char_->set_write_callback([callback](const Value& v) -> WriteResponse {
-        uint8_t active = std::get<uint8_t>(v);
+        auto* active_p = std::get_if<uint8_t>(&v);
+        uint8_t active = active_p ? *active_p : 0;
         if (callback) callback(active == 1);
         return std::nullopt; // Success
     });

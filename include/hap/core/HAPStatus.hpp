@@ -40,7 +40,11 @@ inline int32_t to_int(HAPStatus status) {
  * @brief Check if a characteristic has a specific permission
  */
 inline bool has_permission(const std::vector<Permission>& perms, Permission perm) {
-    return std::find(perms.begin(), perms.end(), perm) != perms.end();
+    // Permissions sets are tiny (max 8 entries); a linear scan is optimal.
+    for (auto p : perms) {
+        if (p == perm) return true;
+    }
+    return false;
 }
 
 } // namespace hap::core

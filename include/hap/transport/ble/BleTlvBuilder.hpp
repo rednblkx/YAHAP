@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <vector>
-#include <span>
 #include <string>
 
 namespace hap::transport::ble {
@@ -37,16 +36,6 @@ enum class HAPBLEPDUTLVType : uint8_t {
 class BleTlvBuilder {
 public:
     BleTlvBuilder() = default;
-    
-    /**
-     * @brief Add a raw TLV.
-     */
-    BleTlvBuilder& add(HAPBLEPDUTLVType type, std::span<const uint8_t> value);
-    
-    /**
-     * @brief Add a uint8_t value.
-     */
-    BleTlvBuilder& add_uint8(HAPBLEPDUTLVType type, uint8_t value);
     
     /**
      * @brief Add a uint16_t value (little-endian).

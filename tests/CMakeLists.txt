@@ -23,3 +23,8 @@ add_test(NAME JSONTest COMMAND json_test)
 add_executable(hap_validation_test HAPValidationTest.cpp)
 target_link_libraries(hap_validation_test PRIVATE hap)
 add_test(NAME HAPValidationTest COMMAND hap_validation_test)
+
+add_executable(core_security_test CoreSecurityTest.cpp)
+target_link_libraries(core_security_test PRIVATE hap)
+add_test(NAME CoreSecurityTest COMMAND core_security_test)
+

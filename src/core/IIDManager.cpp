@@ -1,4 +1,5 @@
 #include "hap/core/IIDManager.hpp"
+#include <charconv>
 #include <sstream>
 
 namespace hap::core {
@@ -34,8 +35,16 @@ void IIDManager::load() {
             auto sep = line.find('=');
             if (sep != std::string::npos) {
                 std::string key = line.substr(0, sep);
-                uint16_t iid = static_cast<uint16_t>(std::stoi(line.substr(sep + 1)));
-                iid_map_[key] = iid;
+                std::string_view value_str(line.data() + sep + 1, line.size() - sep - 1);
+                uint16_t iid = 0;
+                auto [ptr, ec] = std::from_chars(value_str.begin(), value_str.end(), iid);
+                if (ec == std::errc() && ptr == value_str.end() && iid != 0) {
+                    iid_map_[key] = iid;
+                } else if (system_) {
+                    // Corrupted persisted entry: skip rather than throw.
+                    system_->log(platform::System::LogLevel::Warning,
+                        "[IIDManager] Skipping malformed IID entry: " + line);
+                }
             }
         }
     }

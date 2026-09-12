@@ -1,12 +1,52 @@
+#include <charconv>
 #include "hap/transport/BleTransport.hpp"
-#include "hap/core/CharacteristicFinder.hpp"
 #include "hap/core/HAPStatus.hpp"
-#include <random>
 #include <algorithm>
 #include <cstring>
+
+#include "hap/core/TLV8.hpp"
+#include "hap/pairing/TLVTypes.hpp"
 #include "hap/core/TLV8.hpp"
 #include "hap/transport/ble/BleTlvBuilder.hpp"
 #include "hap/core/CharacteristicSerializer.hpp"
+
+namespace {
+// Parse "AA:BB:CC:DD:EE:FF" into 6 bytes. Returns false on malformed input
+// (the output is zeroed in that case).
+bool parse_device_id(const std::string& accessory_id, std::array<uint8_t, 6>& out) {
+    out.fill(0);
+    return sscanf(accessory_id.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+                  &out[0], &out[1], &out[2], &out[3], &out[4], &out[5]) == 6;
+}
+
+// Parse a stored config-number string without throwing (from_chars, no locale).
+bool parse_config_number(const std::string& str, uint8_t& out) {
+    uint32_t parsed = 0;
+    auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), parsed);
+    if (ec != std::errc() || ptr != str.data() + str.size() || parsed > 255) {
+        return false;
+    }
+    out = static_cast<uint8_t>(parsed);
+    return true;
+}
+
+namespace {
+// HAP-BLE security: the unauthenticated pairing endpoints (Pair Setup 0x4C,
+// Pair Verify 0x4E, Pairing Features 0x4F) work without an encrypted session;
+// every other characteristic requires one. Named predicate instead of UUID
+// string parsing scattered over call sites.
+bool characteristic_requires_encryption(const std::string& uuid) {
+    // HAP base UUID short form lives at chars 4-7 of "0000XXXX-...".
+    if (uuid.size() < 8) return true;
+    static const std::array<std::string_view, 3> kUnsecured = {"4C", "4E", "4F"};
+    std::string_view short_uuid(uuid.data() + 4, 4);
+    for (auto u : kUnsecured) {
+        if (short_uuid == "000" + std::string(u)) return false;
+    }
+    return true;
+}
+} // namespace
+} // namespace
 
 static std::string to_hex_string(const uint8_t* data, size_t len) {
     std::string s;
@@ -42,6 +82,13 @@ void BleTransport::start() {
 
     config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Starting...");
 
+    config_.ble->set_connect_callback([this](uint16_t connection_id) {
+        // Connectable advertising stops when the connection is established.
+        advertising_active_ = false;
+        config_.system->log(platform::System::LogLevel::Debug,
+            "[BleTransport] Device connected, connection_id=" + std::to_string(connection_id));
+    });
+
     config_.ble->set_disconnect_callback([this](uint16_t connection_id) {
         config_.system->log(platform::System::LogLevel::Info, 
             "[BleTransport] Device disconnected, connection_id=" + std::to_string(connection_id));
@@ -71,273 +118,127 @@ void BleTransport::stop() {
     if (config_.ble) {
         config_.ble->stop_advertising();
     }
+    advertising_active_ = false;
+}
+
+uint16_t BleTransport::get_ble_iid(const std::string& key) {
+    if (config_.iid_manager) {
+        return config_.iid_manager->get_or_assign(key);
+    }
+    // Fallback: deterministic hash of the key (stable per device, non-zero).
+    uint16_t iid = 1;
+    for (char c : key) iid = static_cast<uint16_t>((iid << 5) + iid) ^ static_cast<uint8_t>(c);
+    return static_cast<uint16_t>((iid & 0x7FFF) + 1);
+}
+
+void BleTransport::add_service_instance_id_characteristic(
+        platform::Ble::ServiceDefinition& svc, uint16_t svc_iid) {
+    platform::Ble::CharacteristicDefinition def;
+    def.uuid = kServiceInstanceIdCharUUID;
+    def.properties = { .read = true };
+    def.on_read = [svc_iid](uint16_t) {
+        std::vector<uint8_t> val;
+        val.push_back(svc_iid & 0xFF);
+        val.push_back((svc_iid >> 8) & 0xFF);
+        return val;
+    };
+    svc.characteristics.push_back(std::move(def));
+}
+
+void BleTransport::add_pairing_characteristic(
+        platform::Ble::ServiceDefinition& svc, uint16_t svc_iid, uint16_t svc_type,
+        const std::string& iid_key, const std::string& uuid,
+        uint16_t char_type, uint16_t properties,
+        const char* user_description) {
+    uint16_t char_iid = get_ble_iid(iid_key);
+
+    platform::Ble::CharacteristicDefinition def;
+    def.uuid = uuid;
+    def.properties.read = true;
+    def.properties.write = true;
+    def.on_write = [this, uuid](uint16_t conn, std::span<const uint8_t> data, bool) {
+        handle_hap_write(conn, uuid, data);
+    };
+    def.on_read = [this](uint16_t conn) {
+        return handle_hap_read(conn);
+    };
+    // Characteristic Instance ID descriptor (mandatory for HAP-BLE).
+    platform::Ble::DescriptorDefinition desc;
+    desc.uuid = kCharacteristicInstanceIdDescUUID;
+    desc.properties.read = true;
+    desc.on_read = [char_iid](uint16_t) {
+        std::vector<uint8_t> val;
+        val.push_back(char_iid & 0xFF);
+        val.push_back((char_iid >> 8) & 0xFF);
+        return val;
+    };
+    def.descriptors.push_back(std::move(desc));
+
+    CharacteristicMetadata meta;
+    meta.instance_id = char_iid;
+    meta.service_id = svc_iid;
+    meta.char_type = char_type;
+    meta.service_type = svc_type;
+    meta.properties = properties;
+    if (user_description) {
+        meta.user_description = user_description;
+    }
+    pairing_char_metadata_[char_iid] = meta;
+
+    config_.system->log(platform::System::LogLevel::Info,
+        "[BleTransport] Registered characteristic " + uuid + " IID=" + std::to_string(char_iid));
+    svc.characteristics.push_back(std::move(def));
 }
 
 void BleTransport::setup_hap_service() {
-    // Use IIDManager for stable IIDs with dedicated keys for HAP pairing service
-    auto get_iid = [this](const std::string& key) -> uint16_t {
-        if (config_.iid_manager) {
-            return config_.iid_manager->get_or_assign(key);
-        }
-        // Fallback: use hash of key as stable-ish IID
-        uint16_t iid = 1;
-        for (char c : key) iid = ((iid << 5) + iid) ^ c;
-        return (iid & 0x7FFF) + 1;  // Ensure positive, non-zero
-    };
-    
-    uint16_t svc_iid = get_iid("BLE:S:0055");  // HAP Pairing Service
-    platform::Ble::ServiceDefinition hap_service;
-    hap_service.uuid = kHapPairingServiceUUID;
-    hap_service.is_primary = true;
+    platform::Ble::ServiceDefinition svc;
+    svc.uuid = kHapPairingServiceUUID;
+    svc.is_primary = true;
+    uint16_t svc_iid = get_ble_iid("BLE:S:0055");
+    uint16_t svc_type = 0x55; // Pairing Service
 
-    auto add_iid_descriptor = [](platform::Ble::CharacteristicDefinition& def, uint16_t iid) {
-        platform::Ble::DescriptorDefinition desc;
-        desc.uuid = kCharacteristicInstanceIdDescUUID;
-        desc.properties.read = true;
-        desc.on_read = [iid](uint16_t) {
-            std::vector<uint8_t> val;
-            val.push_back(iid & 0xFF);
-            val.push_back((iid >> 8) & 0xFF);
-            return val;
-        };
-        def.descriptors.push_back(std::move(desc));
-    };
+    add_service_instance_id_characteristic(svc, svc_iid);
 
-    {
-        platform::Ble::CharacteristicDefinition def;
-        def.uuid = kServiceInstanceIdCharUUID;
-        def.properties = { .read = true };
-        def.on_read = [svc_iid](uint16_t) {
-            std::vector<uint8_t> val;
-            val.push_back(svc_iid & 0xFF);
-            val.push_back((svc_iid >> 8) & 0xFF);
-            return val;
-        };
-        hap_service.characteristics.push_back(std::move(def));
-    }
-
-    {
-        uint16_t char_iid = get_iid("BLE:C:004C:0055");  // Pair Setup
-        platform::Ble::CharacteristicDefinition def;
-        def.uuid = "0000004C-0000-1000-8000-0026BB765291";
-        def.properties = { .read = true, .write = true };
-        def.on_write = [this](uint16_t conn, std::span<const uint8_t> data, bool) {
-            config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Pair Setup Write: " + std::to_string(data.size()) + " bytes");
-            handle_hap_write(conn, "0000004C-0000-1000-8000-0026BB765291", data);
-        };
-        def.on_read = [this](uint16_t conn) {
-            return handle_hap_read(conn);
-        };
-        add_iid_descriptor(def, char_iid);
-        
-        CharacteristicMetadata meta;
-        meta.instance_id = char_iid;
-        meta.service_id = svc_iid;
-        meta.char_type = 0x4C;  // Pair Setup
-        meta.service_type = 0x55;  // Pairing Service
-        meta.properties = 0x0003;  // Read | Write (NOT Paired Read/Write!)
-        pairing_char_metadata_[char_iid] = meta;
-        
-        config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Registered Pair Setup (4C) IID=" + std::to_string(char_iid));
-        hap_service.characteristics.push_back(std::move(def));
-    }
-
-    {
-        uint16_t char_iid = get_iid("BLE:C:004E:0055");  // Pair Verify
-        platform::Ble::CharacteristicDefinition def;
-        def.uuid = "0000004E-0000-1000-8000-0026BB765291";
-        def.properties.read = true;
-        def.properties.write = true;
-        def.properties.indicate = false;
-        def.properties.notify = false;
-        def.on_write = [this](uint16_t conn, std::span<const uint8_t> data, bool) {
-            handle_hap_write(conn, "0000004E-0000-1000-8000-0026BB765291", data);
-        };
-        def.on_read = [this](uint16_t conn) {
-            return handle_hap_read(conn);
-        };
-        add_iid_descriptor(def, char_iid);
-        
-        CharacteristicMetadata meta;
-        meta.instance_id = char_iid;
-        meta.service_id = svc_iid;
-        meta.service_type = 0x55;  // Pairing Service
-        meta.char_type = 0x4E;  // Pair Verify
-        meta.properties = 0x0003;  // Read | Write (NOT Paired Read/Write!)
-        pairing_char_metadata_[char_iid] = meta;
-        
-        hap_service.characteristics.push_back(std::move(def));
-    }
-
-    {
-        config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Adding Pairing Features...");
-        uint16_t char_iid = get_iid("BLE:C:004F:0055");  // Pairing Features
-        platform::Ble::CharacteristicDefinition def;
-        def.uuid = "0000004F-0000-1000-8000-0026BB765291";
-        def.properties.read = true;
-        def.properties.write = true;
-        def.properties.indicate = false;
-        def.properties.notify = false;
-        def.on_write = [this](uint16_t conn, std::span<const uint8_t> data, bool) {
-            handle_hap_write(conn, "0000004F-0000-1000-8000-0026BB765291", data);
-        };
-        def.on_read = [this](uint16_t conn) {
-            return handle_hap_read(conn);
-        };
-        add_iid_descriptor(def, char_iid);
-        
-        CharacteristicMetadata meta;
-        meta.instance_id = char_iid;
-        meta.service_id = svc_iid;
-        meta.char_type = 0x4F;  // Pairing Features
-        meta.service_type = 0x55;  // Pairing Service
-        meta.properties = 0x0001;  // Read only (NOT Paired Read!)
-        meta.user_description = "Pairing Features";
-        pairing_char_metadata_[char_iid] = meta;
-        
-        hap_service.characteristics.push_back(std::move(def));
-    }
-
-    {
-        config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Adding Pairing Pairings...");
-        uint16_t char_iid = get_iid("BLE:C:0050:0055");  // Pairing Pairings
-        platform::Ble::CharacteristicDefinition def;
-        def.uuid = "00000050-0000-1000-8000-0026BB765291";
-        def.properties.read = true;
-        def.properties.write = true;
-        def.properties.indicate = false;
-        def.properties.notify = false;
-        
-        def.on_write = [this](uint16_t conn, std::span<const uint8_t> data, bool) {
-            handle_hap_write(conn, "00000050-0000-1000-8000-0026BB765291", data);
-        };
-        
-        def.on_read = [this](uint16_t conn) {
-            return handle_hap_read(conn);
-        };
-        add_iid_descriptor(def, char_iid);
-        
-        CharacteristicMetadata meta;
-        meta.instance_id = char_iid;
-        meta.service_id = svc_iid;
-        meta.char_type = 0x50;  // Pairing Pairings
-        meta.service_type = 0x55;  // Pairing Service
-        meta.properties = 0x0030;  // Paired Read (0x10) | Paired Write (0x20)
-        pairing_char_metadata_[char_iid] = meta;
-        
-        hap_service.characteristics.push_back(std::move(def));
-    }
+    add_pairing_characteristic(svc, svc_iid, svc_type, "BLE:C:004C:0055",
+        "0000004C-0000-1000-8000-0026BB765291", 0x4C, 0x0003); // Pair Setup: Read|Write
+    add_pairing_characteristic(svc, svc_iid, svc_type, "BLE:C:004E:0055",
+        "0000004E-0000-1000-8000-0026BB765291", 0x4E, 0x0003); // Pair Verify: Read|Write
+    add_pairing_characteristic(svc, svc_iid, svc_type, "BLE:C:004F:0055",
+        "0000004F-0000-1000-8000-0026BB765291", 0x4F, 0x0001, "Pairing Features"); // Read only
+    add_pairing_characteristic(svc, svc_iid, svc_type, "BLE:C:0050:0055",
+        "00000050-0000-1000-8000-0026BB765291", 0x50, 0x0030); // Pairings: Paired Read|Write
 
     config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Registering Service...");
-    config_.ble->register_service(hap_service);
-    
-    // Save IIDManager state if available
+    config_.ble->register_service(svc);
+
     if (config_.iid_manager) {
         config_.iid_manager->save();
     }
 }
 
 void BleTransport::setup_protocol_info_service() {
-    // Use IIDManager for stable IIDs with dedicated keys for Protocol Info service
-    auto get_iid = [this](const std::string& key) -> uint16_t {
-        if (config_.iid_manager) {
-            return config_.iid_manager->get_or_assign(key);
-        }
-        // Fallback: use hash of key as stable-ish IID
-        uint16_t iid = 1;
-        for (char c : key) iid = ((iid << 5) + iid) ^ c;
-        return (iid & 0x7FFF) + 1;  // Ensure positive, non-zero
-    };
-    
-    uint16_t svc_iid = get_iid("BLE:S:00A2");  // Protocol Information Service
-    platform::Ble::ServiceDefinition proto_service;
-    proto_service.uuid = kHapProtocolInformationServiceUUID;
-    proto_service.is_primary = true;
+    platform::Ble::ServiceDefinition svc;
+    svc.uuid = kHapProtocolInformationServiceUUID;
+    svc.is_primary = true;
+    uint16_t svc_iid = get_ble_iid("BLE:S:00A2");
+    uint16_t svc_type = 0xA2; // Protocol Information Service
 
-    auto add_iid_descriptor = [](platform::Ble::CharacteristicDefinition& def, uint16_t iid) {
-        platform::Ble::DescriptorDefinition desc;
-        desc.uuid = kCharacteristicInstanceIdDescUUID;
-        desc.properties.read = true;
-        desc.on_read = [iid](uint16_t) {
-            std::vector<uint8_t> val;
-            val.push_back(iid & 0xFF);
-            val.push_back((iid >> 8) & 0xFF);
-            return val;
-        };
-        def.descriptors.push_back(std::move(desc));
-    };
+    add_service_instance_id_characteristic(svc, svc_iid);
 
-    {
-        platform::Ble::CharacteristicDefinition def;
-        def.uuid = kServiceInstanceIdCharUUID;
-        def.properties = { .read = true };
-        def.on_read = [svc_iid](uint16_t) {
-            std::vector<uint8_t> val;
-            val.push_back(svc_iid & 0xFF);
-            val.push_back((svc_iid >> 8) & 0xFF);
-            return val;
-        };
-        proto_service.characteristics.push_back(std::move(def));
-    }
+    add_pairing_characteristic(svc, svc_iid, svc_type, "BLE:C:00A5:00A2",
+        kServiceSignatureCharUUID, 0xA5, 0x0010); // Service Signature: Paired Read
+    add_pairing_characteristic(svc, svc_iid, svc_type, "BLE:C:0037:00A2",
+        "00000037-0000-1000-8000-0026BB765291", 0x37, 0x0010); // Version: Paired Read
 
-    {
-        uint16_t char_iid = get_iid("BLE:C:00A5:00A2");  // Service Signature
-        platform::Ble::CharacteristicDefinition def;
-        def.uuid = kServiceSignatureCharUUID;
-        def.properties = { .read = true, .write = true };
-        def.on_write = [this](uint16_t conn, std::span<const uint8_t> data, bool) {
-            handle_hap_write(conn, kServiceSignatureCharUUID, data);
-        };
-        def.on_read = [this](uint16_t conn) {
-             return handle_hap_read(conn);
-         };
-        add_iid_descriptor(def, char_iid);
-        
-        CharacteristicMetadata meta;
-        meta.instance_id = char_iid;
-        meta.service_id = svc_iid;
-        meta.char_type = 0xA5;  // Service Signature
-        meta.service_type = 0xA2;  // Protocol Information Service
-        meta.properties = 0x0010;  // Paired Read only
-        pairing_char_metadata_[char_iid] = meta;
-        
-        proto_service.characteristics.push_back(std::move(def));
-    }
+    config_.ble->register_service(svc);
 
-    {
-        uint16_t char_iid = get_iid("BLE:C:0037:00A2");  // Version
-        platform::Ble::CharacteristicDefinition def;
-        def.uuid = "00000037-0000-1000-8000-0026BB765291";
-        def.properties = { .read = true, .write = true };
-        def.on_write = [this](uint16_t conn, std::span<const uint8_t> data, bool) {
-            handle_hap_write(conn, "00000037-0000-1000-8000-0026BB765291", data);
-        };
-        def.on_read = [this](uint16_t conn) {
-            return handle_hap_read(conn);
-        };
-        add_iid_descriptor(def, char_iid);
-        
-        CharacteristicMetadata meta;
-        meta.instance_id = char_iid;
-        meta.service_id = svc_iid;
-        meta.char_type = 0x37;  // Version
-        meta.service_type = 0xA2;  // Protocol Information Service
-        meta.properties = 0x0010;  // Paired Read only
-        pairing_char_metadata_[char_iid] = meta;
-        
-        proto_service.characteristics.push_back(std::move(def));
-    }
-
-    config_.ble->register_service(proto_service);
-    
-    // Save IIDManager state if available
     if (config_.iid_manager) {
         config_.iid_manager->save();
     }
 }
 
 void BleTransport::update_advertising() {
-    config_.system->log(platform::System::LogLevel::Info, "[BleTransport] update_advertising entry");
+    config_.system->log(platform::System::LogLevel::Debug, "[BleTransport] update_advertising entry");
     
     auto setup_id_bytes = config_.storage->get("setup_id");
     std::string setup_id;
@@ -346,10 +247,10 @@ void BleTransport::update_advertising() {
         config_.system->log(platform::System::LogLevel::Debug, "[BleTransport] Using existing Setup ID: " + setup_id);
     } else {
         const char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        std::mt19937 rng(std::random_device{}());
-        std::uniform_int_distribution<> dist(0, 35);
+        std::array<uint8_t, 4> rand_bytes{};
+        config_.system->random_bytes(rand_bytes);
         for (int i = 0; i < 4; ++i) {
-            setup_id += charset[dist(rng)];
+            setup_id += charset[rand_bytes[i] % 36];
         }
         config_.storage->set("setup_id", std::vector<uint8_t>(setup_id.begin(), setup_id.end()));
         config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Generated new Setup ID: " + setup_id);
@@ -376,34 +277,25 @@ void BleTransport::update_advertising() {
     bool is_paired = (pairing_list && pairing_list->size() > 2);
     uint8_t status_flags = is_paired ? 0x00 : 0x01;
     
-    uint8_t device_id[6] = {0};
-    int scanned = sscanf(config_.accessory_id.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", 
-        &device_id[0], &device_id[1], &device_id[2], &device_id[3], &device_id[4], &device_id[5]);
-    if (scanned != 6) {
+    std::array<uint8_t, 6> device_id{};
+    if (!parse_device_id(config_.accessory_id, device_id)) {
          config_.system->log(platform::System::LogLevel::Warning, "[BleTransport] Invalid Device ID format: " + config_.accessory_id);
     }
 
-    uint16_t gsn = 1;
-    auto gsn_bytes = config_.storage->get("gsn");
-    if (gsn_bytes && gsn_bytes->size() == 2) {
-        gsn = static_cast<uint16_t>((*gsn_bytes)[0]) | (static_cast<uint16_t>((*gsn_bytes)[1]) << 8);
-        if (gsn == 0) gsn = 1;
-    } else {
-        std::vector<uint8_t> gsn_data = {0x01, 0x00};
-        config_.storage->set("gsn", gsn_data);
-        config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Initialized GSN to 1");
-    }
+    uint16_t gsn = get_current_gsn();
 
     uint8_t config_number = 1;
     auto cn_bytes = config_.storage->get("config_number");
     if (cn_bytes && !cn_bytes->empty()) {
         std::string cn_str(cn_bytes->begin(), cn_bytes->end());
-        config_number = static_cast<uint8_t>(std::stoi(cn_str));
+        if (!parse_config_number(cn_str, config_number)) {
+                config_number = 1;
+            }
     }
 
     auto adv = platform::Ble::Advertisement::create_hap(
         status_flags,
-        device_id,
+        device_id.data(),
         config_.category_id,
         gsn,
         config_number,
@@ -418,19 +310,38 @@ void BleTransport::update_advertising() {
         snprintf(buf, sizeof(buf), "%02X ", byte);
         adv_hex += buf;
     }
-    config_.system->log(platform::System::LogLevel::Info, 
+    config_.system->log(platform::System::LogLevel::Debug, 
         "[BleTransport] Advertisement Data (" + std::to_string(adv.manufacturer_data.size()) + " bytes): " + adv_hex);
-    config_.system->log(platform::System::LogLevel::Info,
+    config_.system->log(platform::System::LogLevel::Debug,
         "[BleTransport] SF=" + std::to_string(status_flags) + 
         " ACID=" + std::to_string(config_.category_id) +
         " GSN=" + std::to_string(gsn) +
         " CN=" + std::to_string(config_number));
 
+    // Only touch the BLE stack when something actually changed AND advertising
+    // is already running with the current payload: restarting advertising on
+    // every characteristic write stalls the connection. After a disconnect the
+    // stack has stopped advertising, so a restart is mandatory even if the
+    // payload is unchanged.
+    std::vector<uint8_t> mfg_sig(adv.manufacturer_data.begin(), adv.manufacturer_data.end());
+    if (advertising_active_ && !adv_dirty_ &&
+        mfg_sig == last_adv_payload_ &&
+        adv.local_name == last_adv_name_) {
+        config_.system->log(platform::System::LogLevel::Debug,
+            "[BleTransport] Advertisement unchanged and active, skipping restart");
+        return;
+    }
+    last_adv_payload_ = mfg_sig;
+    last_adv_name_ = adv.local_name;
+    adv_dirty_ = false;
+
     config_.ble->start_advertising(adv, config_.ble->interval_config.normal_interval_ms);
+    advertising_active_ = true;
 }
 
 void BleTransport::set_accessory_id(const std::string& new_id) {
     config_.accessory_id = new_id;
+    adv_dirty_ = true; // device-id in the payload changes with the accessory ID
     config_.system->log(platform::System::LogLevel::Info, 
         "[BleTransport] Accessory ID updated to: " + new_id);
 }
@@ -440,29 +351,25 @@ void BleTransport::notify_value_changed(uint64_t aid, uint64_t iid, const core::
 }
 
 void BleTransport::increment_gsn() {
-    // Per Spec 7.4.6: GSN increments on characteristic changes
-    // Range: 1-65535, wraps to 1 on overflow
-    auto gsn_bytes = config_.storage->get("gsn");
-    uint16_t gsn = 1;
-    
-    if (gsn_bytes && gsn_bytes->size() == 2) {
-        gsn = static_cast<uint16_t>((*gsn_bytes)[0]) | (static_cast<uint16_t>((*gsn_bytes)[1]) << 8);
-    }
-    
+    // GSN is cached in RAM and persisted only on change: a flash write on the
+    // characteristic-write path stalls the connection for milliseconds.
+    uint16_t gsn = get_current_gsn();
     gsn++;
     if (gsn == 0) {
         gsn = 1;
     }
-    
+    cached_gsn_ = gsn;
+    gsn_loaded_ = true;
+
     std::vector<uint8_t> gsn_data = {
         static_cast<uint8_t>(gsn & 0xFF),
         static_cast<uint8_t>((gsn >> 8) & 0xFF)
     };
     config_.storage->set("gsn", gsn_data);
-    
-    config_.system->log(platform::System::LogLevel::Debug, 
+
+    config_.system->log(platform::System::LogLevel::Debug,
         "[BleTransport] GSN incremented to " + std::to_string(gsn));
-    
+
     update_advertising();
 }
 
@@ -493,18 +400,7 @@ void BleTransport::handle_hap_write(uint16_t connection_id, const std::string& u
         session_is_secured = session->context->is_encrypted();
     }
     
-    bool requires_encryption = true;
-    {
-        if (uuid.size() >= 8) {
-            std::string short_uuid_str = uuid.substr(4, 4);
-            unsigned int short_uuid = 0;
-            if (sscanf(short_uuid_str.c_str(), "%x", &short_uuid) == 1) {
-                if (short_uuid == 0x4C || short_uuid == 0x4E || short_uuid == 0x4F) {
-                    requires_encryption = false;
-                }
-            }
-        }
-    }
+    const bool requires_encryption = characteristic_requires_encryption(uuid);
 
     std::vector<uint8_t> decrypted_data;
     std::span<const uint8_t> working_data = data;
@@ -522,7 +418,8 @@ void BleTransport::handle_hap_write(uint16_t connection_id, const std::string& u
         if (!decrypted) {
             config_.system->log(platform::System::LogLevel::Error, 
                 "[BleTransport] Decryption failed for connection " + std::to_string(connection_id) + " - disconnecting");
-            // Per HAP Spec 6.5.2.2: Close connection on decryption failure
+            // HAP 6.5.2 (Session Security): on decryption failure the
+            // connection must be closed immediately.
             config_.ble->disconnect(connection_id);
             session_manager_->remove(connection_id);
             return;
@@ -613,6 +510,68 @@ std::vector<uint8_t> BleTransport::handle_hap_read(uint16_t connection_id) {
     return {};
 }
 
+
+namespace {
+// Decode a BLE TLV value blob into a characteristic-typed Value.
+// Returns false when the data is too short for the format, so the caller can
+// answer with an error instead of writing a garbage/default value.
+bool decode_ble_value(core::Format format, const std::vector<uint8_t>& data, core::Value& out) {
+    auto le16 = [](const std::vector<uint8_t>& d) {
+        return static_cast<uint16_t>(d[0] | (d[1] << 8));
+    };
+    auto le32 = [](const std::vector<uint8_t>& d) {
+        return static_cast<uint32_t>(d[0] | (d[1] << 8) | (d[2] << 16) | (d[3] << 24));
+    };
+    switch (format) {
+        case core::Format::Bool:
+            out = static_cast<bool>(data[0] != 0);
+            return true;
+        case core::Format::UInt8:
+            out = data[0];
+            return true;
+        case core::Format::UInt16:
+            if (data.size() < 2) return false;
+            out = le16(data);
+            return true;
+        case core::Format::UInt32:
+            if (data.size() < 4) return false;
+            out = le32(data);
+            return true;
+        case core::Format::UInt64:
+            if (data.size() < 8) return false;
+            {
+                uint64_t v = 0;
+                for (int i = 0; i < 8; ++i) v |= static_cast<uint64_t>(data[i]) << (i * 8);
+                out = v;
+            }
+            return true;
+        case core::Format::Int:
+            if (data.size() < 4) return false;
+            out = static_cast<int32_t>(le32(data));
+            return true;
+        case core::Format::Float:
+            if (data.size() < 4) return false;
+            {
+                uint32_t raw = le32(data);
+                float f;
+                std::memcpy(&f, &raw, sizeof(f));
+                out = f;
+            }
+            return true;
+        case core::Format::String:
+            out = std::string(data.begin(), data.end());
+            return true;
+        case core::Format::TLV8:
+        case core::Format::Data:
+            out = data;
+            return true;
+    }
+    return false;
+}
+} // namespace
+
+
+
 void BleTransport::process_transaction(uint16_t connection_id, TransactionState& state) {
     // Header is 5 bytes: CF(1) | Opcode(1) | TID(1) | IID(2)
     if (state.buffer.size() < 5) return; 
@@ -626,8 +585,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         if (state.buffer.size() < 7) return;
         
         uint16_t body_length = state.buffer[5] | (static_cast<uint16_t>(state.buffer[6]) << 8);
-        state.expected_body_length = body_length;
-        
+
         size_t expected_total = 7 + body_length;
         
         if (state.buffer.size() < expected_total) {
@@ -647,25 +605,25 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
     uint16_t tid = state.buffer[2];
     uint16_t iid = state.buffer[3] | (state.buffer[4] << 8);
 
+    // Pair Verify (0x4E) responses complete Pair Verify; the security upgrade
+    // must happen only after the M4 response has been queued (see below).
+    const bool is_pair_verify_write =
+        state.target_uuid == "0000004E-0000-1000-8000-0026BB765291";
+
     config_.system->log(platform::System::LogLevel::Info, "[BleTransport] Processing Opcode " + std::to_string((int)opcode) + " TID=" + std::to_string(tid));
     
-    std::unique_ptr<core::CharacteristicFinder> finder;
-    if (config_.database) {
-        finder = std::make_unique<core::CharacteristicFinder>(*config_.database);
-    }
-    
     auto find_service = [&](uint16_t target_iid) -> std::shared_ptr<core::Service> {
-        return finder ? finder->service_by_iid(target_iid) : nullptr;
+        return config_.database ? config_.database->find_service_by_iid(target_iid) : nullptr;
     };
-    
+
     auto find_char_in_db = [&](uint16_t target_iid) -> std::shared_ptr<core::Characteristic> {
-        return finder ? finder->by_iid(target_iid) : nullptr;
+        return config_.database ? config_.database->find_characteristic_by_iid(target_iid) : nullptr;
     };
-    
+
     // Helper to get full characteristic info including AID
-    auto find_char_info = [&](uint16_t target_iid) -> core::CharacteristicFinder::CharacteristicInfo {
-        if (finder) {
-            return finder->find_info(target_iid);
+    auto find_char_info = [&](uint16_t target_iid) -> core::AttributeDatabase::CharacteristicLocation {
+        if (config_.database) {
+            return config_.database->find_characteristic_info(target_iid);
         }
         return {};
     };
@@ -883,6 +841,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
              } else {
                  response_body = resp.body;
              }
+
         }
         else {
              auto ch = find_char_in_db(iid);
@@ -894,57 +853,19 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                  auto value_tlv = core::TLV8::find(body_tlvs, 0x01);
                  if (value_tlv && !value_tlv->empty()) {
                      core::Value new_value;
-                     switch (ch->format()) {
-                         case core::Format::Bool:
-                             new_value = static_cast<bool>((*value_tlv)[0] != 0);
-                             break;
-                         case core::Format::UInt8:
-                             new_value = (*value_tlv)[0];
-                             break;
-                         case core::Format::UInt16:
-                             if (value_tlv->size() >= 2) {
-                                 new_value = static_cast<uint16_t>((*value_tlv)[0] | ((*value_tlv)[1] << 8));
-                             }
-                             break;
-                         case core::Format::UInt32:
-                             if (value_tlv->size() >= 4) {
-                                 new_value = static_cast<uint32_t>(
-                                     (*value_tlv)[0] | ((*value_tlv)[1] << 8) |
-                                     ((*value_tlv)[2] << 16) | ((*value_tlv)[3] << 24));
-                             }
-                             break;
-                         case core::Format::Int:
-                             if (value_tlv->size() >= 4) {
-                                 new_value = static_cast<int32_t>(
-                                     (*value_tlv)[0] | ((*value_tlv)[1] << 8) |
-                                     ((*value_tlv)[2] << 16) | ((*value_tlv)[3] << 24));
-                             }
-                             break;
-                         case core::Format::Float:
-                            if (value_tlv->size() >= 4) {
-                                uint32_t raw = (*value_tlv)[0] | ((*value_tlv)[1] << 8) |
-                                            ((*value_tlv)[2] << 16) | ((*value_tlv)[3] << 24);
-                                float f;
-                                std::memcpy(&f, &raw, sizeof(f));
-                                new_value = f;
-                            }
-                            break;
-                         case core::Format::String:
-                            new_value = std::string(value_tlv->begin(), value_tlv->end());
-                            break;
-                         case core::Format::TLV8:
-                         case core::Format::Data:
-                            new_value = std::vector<uint8_t>(value_tlv->begin(), value_tlv->end());
-                            break;
-                         default:
-                            break;
+                     if (!decode_ble_value(ch->format(), *value_tlv, new_value)) {
+                         config_.system->log(platform::System::LogLevel::Warning,
+                             "[BleTransport] Write IID=" + std::to_string(iid) + " - value too short for format");
+                         send_response(connection_id, state.transaction_id, state.target_uuid, 0x06, {});
+                         return;
                      }
                      
                      ch->set_value(new_value, core::EventSource::from_connection(connection_id));
                      config_.system->log(platform::System::LogLevel::Info, 
                          "[BleTransport] Write IID=" + std::to_string(iid) + " success");
                      
-                     // Per HAP Spec 7.4.1.8: GSN increments on first characteristic change per connection
+                     // HAP 7.4.6.1: GSN increments once for multiple
+                     // characteristic changes while in the connected state
                      if (!state.gsn_incremented) {
                          state.gsn_incremented = true;
                          increment_gsn();
@@ -998,13 +919,21 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                  status = 0x05; // Not Found
              }
         }
-        
+
         send_response(connection_id, state.transaction_id, state.target_uuid, status, response_body);
+
+        // The M4 response was just queued in cleartext; only now may the
+        // session switch to encrypted (HAP: security starts after PV ends).
+        if (is_pair_verify_write) {
+            auto& pv_session = session_manager_->get_or_create(connection_id);
+            if (pv_session.context) {
+                config_.pairing_endpoints->complete_pair_verify(*pv_session.context);
+            }
+        }
     }
     else if (opcode == PDUOpcode::CharacteristicTimedWrite) {
         state.timed_write_body.assign(body.begin(), body.end());
         state.timed_write_iid = iid;
-        state.target_uuid = state.target_uuid;
         
         config_.system->log(platform::System::LogLevel::Info,
             "[BleTransport] Timed Write stored for IID=" + std::to_string(iid) + 
@@ -1087,46 +1016,14 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                     auto value_tlv = core::TLV8::find(body_tlvs, 0x01);
                     if (value_tlv && !value_tlv->empty()) {
                         core::Value new_value;
-                        switch (ch->format()) {
-                            case core::Format::Bool:
-                                new_value = static_cast<bool>((*value_tlv)[0] != 0);
-                                break;
-                            case core::Format::UInt8:
-                                new_value = (*value_tlv)[0];
-                                break;
-                            case core::Format::UInt16:
-                                if (value_tlv->size() >= 2) {
-                                    new_value = static_cast<uint16_t>((*value_tlv)[0] | ((*value_tlv)[1] << 8));
-                                }
-                                break;
-                            case core::Format::UInt32:
-                                if (value_tlv->size() >= 4) {
-                                    new_value = static_cast<uint32_t>(
-                                        (*value_tlv)[0] | ((*value_tlv)[1] << 8) |
-                                        ((*value_tlv)[2] << 16) | ((*value_tlv)[3] << 24));
-                                }
-                                break;
-                            case core::Format::Int:
-                                if (value_tlv->size() >= 4) {
-                                    new_value = static_cast<int32_t>(
-                                        (*value_tlv)[0] | ((*value_tlv)[1] << 8) |
-                                        ((*value_tlv)[2] << 16) | ((*value_tlv)[3] << 24));
-                                }
-                                break;
-                            case core::Format::Float:
-                                if (value_tlv->size() >= 4) {
-                                    uint32_t raw = (*value_tlv)[0] | ((*value_tlv)[1] << 8) |
-                                                ((*value_tlv)[2] << 16) | ((*value_tlv)[3] << 24);
-                                    float f;
-                                    std::memcpy(&f, &raw, sizeof(f));
-                                    new_value = f;
-                                }
-                                break;
-                            case core::Format::String:
-                                new_value = std::string(value_tlv->begin(), value_tlv->end());
-                                break;
-                            default:
-                                break;
+                        if (!decode_ble_value(ch->format(), *value_tlv, new_value)) {
+                            config_.system->log(platform::System::LogLevel::Warning,
+                                "[BleTransport] Execute Timed Write IID=" + std::to_string(state.timed_write_iid) + " - value too short for format");
+                            status = 0x06; // Invalid Request
+                            send_response(connection_id, state.transaction_id, state.target_uuid, status, response_body);
+                            state.timed_write_body.clear();
+                            state.timed_write_iid = 0;
+                            return;
                         }
                         
                         // Pass EventSource so the originating connection is excluded from notifications
@@ -1134,7 +1031,8 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                         config_.system->log(platform::System::LogLevel::Info, 
                             "[BleTransport] Execute Timed Write IID=" + std::to_string(state.timed_write_iid) + " success");
                         
-                        // Per HAP Spec 7.4.1.8: GSN increments on first characteristic change per connection
+                        // HAP 7.4.6.1: GSN increments once for multiple
+                     // characteristic changes while in the connected state
                         if (!state.gsn_incremented) {
                             state.gsn_incremented = true;
                             increment_gsn();
@@ -1197,7 +1095,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         response_body = core::TLV8::encode(resp_tlvs);
         
         // Store broadcast configuration for this characteristic
-        // Per HAP Spec 7.4.6.2: Properties bit 0x0001 enables broadcast notification
+        // HAP Table 7-29 (7.3.4.14): bit 0x0001 = Enable Broadcast Notification
         bool broadcast_enabled = (properties & 0x0001) != 0;
         broadcast_configs_[iid] = BroadcastConfig{iid, broadcast_interval, broadcast_enabled};
         
@@ -1218,7 +1116,6 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         auto config_tlvs = core::TLV8::parse(std::vector<uint8_t>(body.begin(), body.end()));
         
         auto gen_key_tlv = core::TLV8::find(config_tlvs, 0x01);
-        auto get_all_tlv = core::TLV8::find(config_tlvs, 0x02);
         
         std::vector<core::TLV> resp_tlvs;
         
@@ -1271,7 +1168,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
             }
         }
         
-        if (get_all_tlv || true) {
+        {
             uint16_t gsn = 1;
             auto gsn_bytes = config_.storage->get("gsn");
             if (gsn_bytes && gsn_bytes->size() == 2) {
@@ -1293,11 +1190,9 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
             
             // Accessory Advertising Identifier TLV (0x03) - 6 bytes
             // Use Device ID as advertising identifier
-            uint8_t device_id[6] = {0};
-            sscanf(config_.accessory_id.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
-                &device_id[0], &device_id[1], &device_id[2], 
-                &device_id[3], &device_id[4], &device_id[5]);
-            resp_tlvs.emplace_back(0x03, std::vector<uint8_t>(device_id, device_id + 6));
+            std::array<uint8_t, 6> device_id{};
+    (void)parse_device_id(config_.accessory_id, device_id);
+            resp_tlvs.emplace_back(0x03, std::vector<uint8_t>(device_id.begin(), device_id.end()));
         }
         
         response_body = core::TLV8::encode(resp_tlvs);
@@ -1306,9 +1201,6 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
             "[BleTransport] Protocol Configuration completed");
         
         send_response(connection_id, state.transaction_id, state.target_uuid, status, response_body);
-    }
-    else if (opcode == PDUOpcode::ServiceSignatureRead) {
-        send_response(connection_id, state.transaction_id, state.target_uuid, 0x00, {});
     }
     else {
         send_response(connection_id, state.transaction_id, state.target_uuid, 0x01, {});
@@ -1324,17 +1216,8 @@ void BleTransport::send_response(uint16_t conn_id, uint16_t tid, const std::stri
         session_is_secured = session_ptr->context->is_encrypted();
     }
     
-    bool requires_encryption = true;
-    if (uuid.size() >= 8) {
-        std::string short_uuid_str = uuid.substr(4, 4);
-        unsigned int short_uuid = 0;
-        if (sscanf(short_uuid_str.c_str(), "%x", &short_uuid) == 1) {
-            if (short_uuid == 0x4C || short_uuid == 0x4E || short_uuid == 0x4F) {
-                requires_encryption = false;
-            }
-        }
-    }
-    
+    const bool requires_encryption = characteristic_requires_encryption(uuid);
+
     if (session_is_secured && requires_encryption) {
         auto& ctx = *session_ptr->context;
         auto encrypted = ctx.get_secure_session()->encrypt_ble_pdu(packet);
@@ -1354,51 +1237,6 @@ void BleTransport::send_response(uint16_t conn_id, uint16_t tid, const std::stri
     // HAP-BLE Spec 7.3.5.1/7.3.5.5: The response is returned in the GATT Read Response.
 }
 
-bool BleTransport::process_characteristic_write(uint16_t connection_id, uint16_t tid, const std::string& uuid, std::span<const uint8_t> body) {
-    auto& session = session_manager_->get_or_create(connection_id);
-    if (!session.context) {
-        session.context = std::make_unique<ConnectionContext>(config_.crypto, config_.system, connection_id);
-    }
-    
-    if (uuid == "0000004C-0000-1000-8000-0026BB765291") { // Pair Setup
-        Request req;
-        req.body.assign(body.begin(), body.end());
-        req.method = Method::POST; 
-        req.path = "/pair-setup";
-        
-        auto resp = config_.pairing_endpoints->handle_pair_setup(req, *session.context);
-        
-        uint8_t status = (resp.status == Status::OK) ? 0x00 : 0x05; 
-        send_response(connection_id, tid, uuid, status, resp.body);
-        return true; 
-    }
-    else if (uuid == "0000004E-0000-1000-8000-0026BB765291") { // Pair Verify
-        Request req;
-        req.body.assign(body.begin(), body.end());
-        req.method = Method::POST;
-        req.path = "/pair-verify";
-        
-        auto resp = config_.pairing_endpoints->handle_pair_verify(req, *session.context);
-        uint8_t status = (resp.status == Status::OK) ? 0x00 : 0x05;
-        send_response(connection_id, tid, uuid, status, resp.body);
-        return true;
-    }
-    else if (uuid == "00000050-0000-1000-8000-0026BB765291") { // Pairing Mappings
-        if (!session.context) return false;
-        
-        Request req;
-        req.body.assign(body.begin(), body.end());
-        req.method = Method::POST;
-        req.path = "/pairings";
-        
-        auto resp = config_.pairing_endpoints->handle_pairings(req, *session.context);
-        uint8_t status = (resp.status == Status::OK) ? 0x00 : 0x05;
-        send_response(connection_id, tid, uuid, status, resp.body);
-        return true;
-    }
-    
-    return false;
-}
 std::vector<uint8_t> BleTransport::process_signature_read(uint16_t connection_id, uint16_t char_iid) {
     (void)connection_id;
     std::vector<uint8_t> response;
@@ -1519,7 +1357,6 @@ std::vector<uint8_t> BleTransport::process_signature_read(uint16_t connection_id
     return response;
 }
 
-std::vector<uint8_t> BleTransport::process_characteristic_read(uint16_t connection_id, std::span<const uint8_t> body) { (void)connection_id; (void)body; return {}; }
 
 void BleTransport::register_accessory_info_service() {
     register_services_by_type(0x3E);
@@ -1636,11 +1473,17 @@ void BleTransport::register_services_by_type(uint16_t filter_type) {
 }
 
 uint16_t BleTransport::get_current_gsn() {
+    if (gsn_loaded_) {
+        return cached_gsn_;
+    }
     auto gsn_bytes = config_.storage->get("gsn");
     uint16_t gsn = 1;
     if (gsn_bytes && gsn_bytes->size() == 2) {
         gsn = static_cast<uint16_t>((*gsn_bytes)[0]) | (static_cast<uint16_t>((*gsn_bytes)[1]) << 8);
     }
+    if (gsn == 0) gsn = 1;
+    cached_gsn_ = gsn;
+    gsn_loaded_ = true;
     return gsn;
 }
 
@@ -1727,19 +1570,19 @@ void BleTransport::handle_characteristic_change(uint64_t aid, uint64_t iid,
         }
     }
     
-    is_connected_ = session_manager_->session_count() > 0;
+    const bool is_connected = session_manager_->session_count() > 0;
     
-    if (is_connected_ && has_connected_subscribers && supports_connected) {
+    if (is_connected && has_connected_subscribers && supports_connected) {
         config_.system->log(platform::System::LogLevel::Info,
             "[BleTransport] Sending Connected Event for IID=" + std::to_string(iid));
         send_connected_event(static_cast<uint16_t>(iid));
     }
-    else if (!is_connected_ && supports_broadcast && broadcast_enabled && is_broadcast_key_valid()) {
+    else if (!is_connected && supports_broadcast && broadcast_enabled && is_broadcast_key_valid()) {
         config_.system->log(platform::System::LogLevel::Info,
             "[BleTransport] Sending Broadcasted Event for IID=" + std::to_string(iid));
         send_broadcasted_event(static_cast<uint16_t>(iid), value);
     }
-    else if (!is_connected_ && supports_disconnected) {
+    else if (!is_connected && supports_disconnected) {
         config_.system->log(platform::System::LogLevel::Info,
             "[BleTransport] Sending Disconnected Event for IID=" + std::to_string(iid));
         send_disconnected_event(static_cast<uint16_t>(iid));
@@ -1747,7 +1590,7 @@ void BleTransport::handle_characteristic_change(uint64_t aid, uint64_t iid,
     else {
         config_.system->log(platform::System::LogLevel::Debug,
             "[BleTransport] No event sent for IID=" + std::to_string(iid) + 
-            " (connected=" + std::to_string(is_connected_) +
+            " (connected=" + std::to_string(is_connected) +
             ", has_subs=" + std::to_string(has_connected_subscribers) +
             ", supports_connected=" + std::to_string(supports_connected) + ")");
     }
@@ -1809,11 +1652,9 @@ void BleTransport::send_broadcasted_event(uint16_t iid, const core::Value& value
     }
     
     increment_gsn();
-    
-    std::array<uint8_t, 6> adv_id = {};
-    sscanf(config_.accessory_id.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
-        &adv_id[0], &adv_id[1], &adv_id[2], 
-        &adv_id[3], &adv_id[4], &adv_id[5]);
+
+    std::array<uint8_t, 6> adv_id{};
+    (void)parse_device_id(config_.accessory_id, adv_id);
     
     uint32_t interval_ms = 20;  // Default 20ms
     if (broadcast_configs_.count(iid)) {
@@ -1868,10 +1709,8 @@ void BleTransport::send_disconnected_event(uint16_t iid) {
     bool is_paired = (pairing_list && pairing_list->size() > 2);
     uint8_t status_flags = is_paired ? 0x00 : 0x01;
     
-    uint8_t device_id[6] = {0};
-    sscanf(config_.accessory_id.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
-        &device_id[0], &device_id[1], &device_id[2],
-        &device_id[3], &device_id[4], &device_id[5]);
+    std::array<uint8_t, 6> device_id{};
+    (void)parse_device_id(config_.accessory_id, device_id);
     
     uint16_t gsn = get_current_gsn();
     
@@ -1879,11 +1718,13 @@ void BleTransport::send_disconnected_event(uint16_t iid) {
     auto cn_bytes = config_.storage->get("config_number");
     if (cn_bytes && !cn_bytes->empty()) {
         std::string cn_str(cn_bytes->begin(), cn_bytes->end());
-        config_number = static_cast<uint8_t>(std::stoi(cn_str));
+        if (!parse_config_number(cn_str, config_number)) {
+                config_number = 1;
+            }
     }
     
     auto adv = platform::Ble::Advertisement::create_hap(
-        status_flags, device_id, config_.category_id, gsn, config_number, setup_hash);
+        status_flags, device_id.data(), config_.category_id, gsn, config_number, setup_hash);
     adv.local_name = config_.device_name;
     
     // Per HAP Spec 7.4.6.3: Use fast interval (20 ms) for 3 seconds, then normal interval
@@ -1929,10 +1770,9 @@ std::vector<uint8_t> BleTransport::build_encrypted_advertisement_payload(uint16_
     nonce[0] = gsn & 0xFF;
     nonce[1] = (gsn >> 8) & 0xFF;
     
-    std::array<uint8_t, 6> aad = {};
-    sscanf(config_.accessory_id.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
-        &aad[0], &aad[1], &aad[2], &aad[3], &aad[4], &aad[5]);
-    
+    std::array<uint8_t, 6> aad{};
+    (void)parse_device_id(config_.accessory_id, aad);
+
     std::vector<uint8_t> ciphertext(12);
     std::array<uint8_t, 16> full_tag = {};
     

@@ -3,7 +3,7 @@
  * @brief Pre-defined HAP Service types and builder classes
  * 
  * This file provides UUID constants and builder classes for all HAP-defined
- * services per HomeKit Accessory Protocol Specification R13.
+ * services.
  * 
  * Usage:
  *   auto info = hap::service::AccessoryInformationBuilder()
@@ -26,11 +26,10 @@
 namespace hap::service {
 
 //==============================================================================
-// Service UUID Type Constants (HAP Spec R13 Section 9)
+// Service UUID Type Constants
 //==============================================================================
 
 constexpr uint64_t kType_AccessoryInformation = 0x3E;       // 9.1
-constexpr uint64_t kType_Fan = 0x40;                        // 9.3 - Legacy Fan (requires On)
 constexpr uint64_t kType_GarageDoorOpener = 0x41;           // 9.4
 constexpr uint64_t kType_LightBulb = 0x43;                  // 9.5
 constexpr uint64_t kType_LockManagement = 0x44;             // 9.6
@@ -39,7 +38,6 @@ constexpr uint64_t kType_NFCAccess = 0x266;
 constexpr uint64_t kType_Outlet = 0x47;                     // 9.8
 constexpr uint64_t kType_Switch = 0x49;                     // 9.9
 constexpr uint64_t kType_Thermostat = 0x4A;                 // 9.10
-constexpr uint64_t kType_Pairing = 0x55;                    // 5.13.1
 constexpr uint64_t kType_SecuritySystem = 0x7E;             // 9.12
 constexpr uint64_t kType_CarbonMonoxideSensor = 0x7F;       // 9.13
 constexpr uint64_t kType_ContactSensor = 0x80;              // 9.14
@@ -68,15 +66,9 @@ constexpr uint64_t kType_ServiceLabel = 0xCC;               // 9.38
 constexpr uint64_t kType_IrrigationSystem = 0xCF;           // 9.39
 constexpr uint64_t kType_Valve = 0xD0;                      // 9.40
 constexpr uint64_t kType_Faucet = 0xD7;                     // 9.41
-constexpr uint64_t kType_CameraRTPStreamManagement = 0x110; // 9.28
 constexpr uint64_t kType_Microphone = 0x112;                // 9.29
 constexpr uint64_t kType_Speaker = 0x113;                   // 9.30
 constexpr uint64_t kType_Doorbell = 0x121;                  // 9.31
-constexpr uint64_t kType_TargetControlManagement = 0x122;   // 9.42
-constexpr uint64_t kType_TargetControl = 0x125;             // 9.43
-constexpr uint64_t kType_AudioStreamManagement = 0x127;     // 9.44
-constexpr uint64_t kType_DataStreamTransportManagement = 0x129; // 9.45
-constexpr uint64_t kType_Siri = 0x133;                      // 9.46
 
 //==============================================================================
 // Service Builder Base Class
@@ -109,7 +101,7 @@ public:
     AccessoryInformationBuilder& firmware_revision(std::string value);
     AccessoryInformationBuilder& hardware_revision(std::string value);
     AccessoryInformationBuilder& on_identify(std::function<void()> callback);
-    AccessoryInformationBuilder& hardwareFinish(std::vector<uint8_t> value);
+    AccessoryInformationBuilder& hardware_finish(std::vector<uint8_t> value);
     
     std::shared_ptr<core::Service> build();
 
@@ -121,7 +113,7 @@ private:
     std::shared_ptr<core::Characteristic> firmware_char_;
     std::shared_ptr<core::Characteristic> hardware_char_;
     std::shared_ptr<core::Characteristic> identify_char_;
-    std::shared_ptr<core::Characteristic> hardwareFinish_char_;
+    std::shared_ptr<core::Characteristic> hardware_finish_char_;
 };
 
 //============================================================================== 

@@ -46,6 +46,8 @@ private:
     
     std::atomic<bool> running_{false};
     std::thread accept_thread_;
+    std::vector<std::thread> client_threads_;
+    std::mutex client_threads_mutex_;
 };
 
 } // namespace linux_pal

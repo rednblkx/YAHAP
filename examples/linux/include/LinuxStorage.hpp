@@ -2,7 +2,9 @@
 
 #include "hap/platform/Storage.hpp"
 #include <nlohmann/json.hpp>
+#include <cstdio>
 #include <fstream>
+#include <iostream>
 #include <mutex>
 #include <map>
 #include <vector>
@@ -45,9 +47,11 @@ public:
         std::vector<uint8_t> result;
         result.reserve(hex.size() / 2);
         
-        for (size_t i = 0; i < hex.size(); i += 2) {
-            unsigned int byte;
-            sscanf(hex.c_str() + i, "%2x", &byte);
+        for (size_t i = 0; i + 1 < hex.size(); i += 2) {
+            unsigned int byte = 0;
+            if (sscanf(hex.c_str() + i, "%2x", &byte) != 1) {
+                return std::nullopt; // corrupt entry, treat as missing
+            }
             result.push_back(static_cast<uint8_t>(byte));
         }
         
@@ -78,18 +82,34 @@ private:
                 file >> j;
                 data_ = j.get<std::map<std::string, std::string>>();
             } catch (...) {
-                // Invalid JSON, start fresh
+                // Invalid JSON: start fresh, but say so — silent corruption
+                // would silently unpair the accessory.
+                std::cerr << "[LinuxStorage] Corrupt or unreadable storage file '"
+                          << filename_ << "', starting fresh" << std::endl;
                 data_.clear();
             }
         }
     }
 
     void save() {
-        std::ofstream file(filename_);
-        if (file.is_open()) {
+        // Write to a temp file then rename: a crash mid-write must not
+        // corrupt the live pairing data.
+        std::string tmp = filename_ + ".tmp";
+        {
+            std::ofstream file(tmp);
+            if (!file.is_open()) {
+                std::cerr << "[LinuxStorage] Cannot open " << tmp << " for writing" << std::endl;
+                return;
+            }
             nlohmann::json j = data_;
             file << j.dump(2);
+            file.flush();
+            if (!file.good()) {
+                std::cerr << "[LinuxStorage] Write failed for " << tmp << std::endl;
+                return;
+            }
         }
+        std::rename(tmp.c_str(), filename_.c_str());
     }
 };
 

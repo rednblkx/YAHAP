@@ -4,7 +4,7 @@
 #include "hap/core/Characteristic.hpp"
 #include "hap/core/HAPValidation.hpp"
 #include <iostream>
-#include <cassert>
+#include "TestUtil.hpp"
 
 using namespace hap::core;
 
@@ -17,7 +17,7 @@ void test_valid_bridge_two_accessories() {
     bridge->add_service(bridge_svc);
     
     auto result1 = db.add_accessory(bridge);
-    assert(result1 == ValidationResult::Success);
+    CHECK(result1 == ValidationResult::Success);
     
     // Bridged accessory (AID=2)
     auto light = std::make_shared<Accessory>(2);
@@ -25,9 +25,9 @@ void test_valid_bridge_two_accessories() {
     light->add_service(light_svc);
     
     auto result2 = db.add_accessory(light);
-    assert(result2 == ValidationResult::Success);
+    CHECK(result2 == ValidationResult::Success);
     
-    assert(db.accessories().size() == 2);
+    CHECK(db.accessories().size() == 2);
     std::cout << "test_valid_bridge_two_accessories passed" << std::endl;
 }
 
@@ -38,16 +38,16 @@ void test_duplicate_aid_fails() {
     acc1->add_service(std::make_shared<Service>(0x3E, "Test"));
     
     auto result1 = db.add_accessory(acc1);
-    assert(result1 == ValidationResult::Success);
+    CHECK(result1 == ValidationResult::Success);
     
     // Try adding another accessory with same AID
     auto acc2 = std::make_shared<Accessory>(1);
     acc2->add_service(std::make_shared<Service>(0x43, "Lightbulb"));
     
     auto result2 = db.add_accessory(acc2);
-    assert(result2 == ValidationResult::DuplicateAccessoryId);
+    CHECK(result2 == ValidationResult::DuplicateAccessoryId);
     
-    assert(db.accessories().size() == 1);
+    CHECK(db.accessories().size() == 1);
     std::cout << "test_duplicate_aid_fails passed" << std::endl;
 }
 
@@ -62,9 +62,9 @@ void test_too_many_services_fails() {
     }
     
     auto result = db.add_accessory(acc);
-    assert(result == ValidationResult::TooManyServices);
+    CHECK(result == ValidationResult::TooManyServices);
     
-    assert(db.accessories().size() == 0);
+    CHECK(db.accessories().size() == 0);
     std::cout << "test_too_many_services_fails passed" << std::endl;
 }
 
@@ -83,18 +83,18 @@ void test_too_many_characteristics_fails() {
     acc->add_service(svc);
     
     auto result = db.add_accessory(acc);
-    assert(result == ValidationResult::TooManyCharacteristics);
+    CHECK(result == ValidationResult::TooManyCharacteristics);
     
-    assert(db.accessories().size() == 0);
+    CHECK(db.accessories().size() == 0);
     std::cout << "test_too_many_characteristics_fails passed" << std::endl;
 }
 
 void test_validation_result_strings() {
-    assert(validation_result_str(ValidationResult::Success) != nullptr);
-    assert(validation_result_str(ValidationResult::TooManyAccessories) != nullptr);
-    assert(validation_result_str(ValidationResult::DuplicateAccessoryId) != nullptr);
-    assert(validation_result_str(ValidationResult::TooManyServices) != nullptr);
-    assert(validation_result_str(ValidationResult::TooManyCharacteristics) != nullptr);
+    CHECK(validation_result_str(ValidationResult::Success) != nullptr);
+    CHECK(validation_result_str(ValidationResult::TooManyAccessories) != nullptr);
+    CHECK(validation_result_str(ValidationResult::DuplicateAccessoryId) != nullptr);
+    CHECK(validation_result_str(ValidationResult::TooManyServices) != nullptr);
+    CHECK(validation_result_str(ValidationResult::TooManyCharacteristics) != nullptr);
     std::cout << "test_validation_result_strings passed" << std::endl;
 }
 
@@ -117,7 +117,7 @@ void test_linked_services() {
     irrigation->add_linked_service(valve1->iid());
     irrigation->add_linked_service(valve2->iid());
     
-    assert(irrigation->linked_services().size() == 2);
+    CHECK(irrigation->linked_services().size() == 2);
     std::cout << "test_linked_services passed" << std::endl;
 }
 

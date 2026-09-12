@@ -1,12 +1,13 @@
 #pragma once
 
 #include "hap/platform/Ble.hpp"
+#include "hap/platform/CryptoSRP.hpp"
 #include "hap/core/AttributeDatabase.hpp"
 #include "hap/core/IIDManager.hpp"
-#include "hap/transport/PairingEndpoints.hpp"
+#include "hap/transport/IPairingEndpoints.hpp"
 #include "hap/transport/ble/BleSessionManager.hpp"
-#include "hap/common/TaskScheduler.hpp"
 #include <memory>
+#include <optional>
 #include <map>
 #include <vector>
 #include <array>
@@ -29,12 +30,11 @@ public:
         platform::Ble* ble;
         platform::CryptoSRP* crypto;
         core::AttributeDatabase* database;
-        PairingEndpoints* pairing_endpoints;
+        IPairingEndpoints* pairing_endpoints;
         platform::System* system;
         platform::Storage* storage;
-        common::TaskScheduler* scheduler = nullptr;
         core::IIDManager* iid_manager = nullptr;
-        
+
         std::string accessory_id;
         std::string device_name;
         uint16_t category_id = 5; // Default to Lightbulb
@@ -101,7 +101,6 @@ private:
     static constexpr const char* kServiceSignatureCharUUID = "000000A5-0000-1000-8000-0026BB765291";
     static constexpr const char* kServiceInstanceIdCharUUID = "E604E95D-A759-4817-87D3-AA005083A0D1";
     static constexpr const char* kCharacteristicInstanceIdDescUUID = "DC46F0FE-81D2-4616-B5D9-6ABDD796939A";
-    static constexpr const char* kHapCharacteristicPropertiesDescUUID = "00000059-0000-1000-8000-0026BB765291";
     
     std::unique_ptr<ble::BleSessionManager> session_manager_;
 
@@ -125,16 +124,32 @@ private:
     };
     std::map<uint16_t, BroadcastConfig> broadcast_configs_;
     
+    std::vector<uint8_t> last_adv_payload_;
+    std::optional<std::string> last_adv_name_;
+    bool adv_dirty_ = false;      // set when state changes that advertising must reflect
+    bool advertising_active_ = false; // cleared on connect/stop: BLE stacks stop connectable
+                                      // advertising on connection; it must be restarted
+                                      // after disconnect even if the payload is unchanged.
+
+    uint16_t cached_gsn_ = 1;
+    bool gsn_loaded_ = false;
+
     // Broadcast encryption key state (per HAP Spec 7.4.7.3-7.4.7.4)
     std::array<uint8_t, 32> broadcast_key_ = {};
     uint16_t broadcast_key_gsn_start_ = 0;  // GSN when key was generated
     bool broadcast_key_valid_ = false;
-    
-    bool is_connected_ = false;
 
 
     void setup_hap_service();
     void setup_protocol_info_service();
+
+    [[nodiscard]] uint16_t get_ble_iid(const std::string& key);
+    void add_service_instance_id_characteristic(platform::Ble::ServiceDefinition& svc, uint16_t svc_iid);
+    void add_pairing_characteristic(platform::Ble::ServiceDefinition& svc,
+                                    uint16_t svc_iid, uint16_t svc_type,
+                                    const std::string& iid_key, const std::string& uuid,
+                                    uint16_t char_type, uint16_t properties,
+                                    const char* user_description = nullptr);
     void increment_gsn();
     uint16_t get_current_gsn();
     
@@ -144,9 +159,7 @@ private:
     
     void process_transaction(uint16_t connection_id, ble::TransactionState& state);
     std::vector<uint8_t> process_signature_read(uint16_t connection_id, uint16_t iid);
-    std::vector<uint8_t> process_characteristic_read(uint16_t connection_id, std::span<const uint8_t> body);
-    bool process_characteristic_write(uint16_t connection_id, uint16_t tid, const std::string& uuid, std::span<const uint8_t> body);
-    
+
     void send_response(uint16_t conn_id, uint16_t tid, const std::string& uuid, uint8_t status, std::span<const uint8_t> body);
     
     /**

@@ -21,7 +21,9 @@ std::vector<TLV> TLV8::parse(std::span<const uint8_t> data) {
         std::span<const uint8_t> value_span = data.subspan(offset, length);
         offset += length;
 
-        if (!result.empty() && result.back().type == type && result.back().value.size() % 255 == 0 && !result.back().value.empty()) {
+        if (!result.empty() && result.back().type == type &&
+            result.back().value.size() == 255 &&
+            result.back().value.size() % 255 == 0) {
             result.back().value.insert(result.back().value.end(), value_span.begin(), value_span.end());
         } else {
             result.emplace_back(type, std::vector<uint8_t>(value_span.begin(), value_span.end()));

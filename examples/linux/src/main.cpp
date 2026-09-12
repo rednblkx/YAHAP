@@ -15,9 +15,6 @@
 #include <cereal/types/string.hpp>
 #include <cereal/types/utility.hpp>
 #include <cereal/types/memory.hpp>
-#include <cereal/types/complex.hpp>
-#include <cereal/types/base_class.hpp>
-#include <cereal/types/array.hpp>
 #include <cereal/types/vector.hpp>
 #include <cereal/types/map.hpp>
 #include <chrono>
@@ -168,7 +165,7 @@ int main() {
         .on_identify([]() {
           std::cout << "🔆 IDENTIFY routine triggered!" << std::endl;
         })
-        .hardwareFinish(hap::core::TLV8::encode({hap::core::TLV(0x01,{0xce,0xd5,0xda,0x00})}))
+        .hardware_finish(hap::core::TLV8::encode({hap::core::TLV(0x01,{0xce,0xd5,0xda,0x00})}))
         .build();
     accessory->add_service(info_service);
 
@@ -198,9 +195,10 @@ int main() {
         .build();
     accessory_2->add_service(protocol_info_service_2);
     std::shared_ptr<hap::core::Service> lock_service = hap::service::LockMechanismBuilder()
-        .on_lock_change([&](bool locked) {
+        .on_lock_change([](bool locked) {
+            // Note: the transport has already written the target state into
+            // the characteristic; this callback only reacts to it.
             std::cout << "🔒 Lock changed to " << (locked ? "LOCKED" : "UNLOCKED") << std::endl;
-            lock_service->characteristics()[0]->set_value(locked);
         })
         .build();
     accessory_2->add_service(lock_service);
@@ -285,9 +283,12 @@ int main() {
 
     g_server = std::make_unique<hap::AccessoryServer>(std::move(config));
     
-    g_server->add_accessory(accessory);
-    g_server->add_accessory(accessory_2);
-    g_server->add_accessory(accessory_3);
+    if (!g_server->add_accessory(accessory) ||
+        !g_server->add_accessory(accessory_2) ||
+        !g_server->add_accessory(accessory_3)) {
+        std::cerr << "Failed to register accessory (duplicate AID or limits exceeded)" << std::endl;
+        return 1;
+    }
     
     // Start Server
     g_server->start();
@@ -297,11 +298,6 @@ int main() {
     // Keep running
     while (true) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        //
-        // uint8_t state = std::get<uint8_t>(lock_service->characteristics()[0]->get_value());
-        // uint8_t new_state = (state == 0) ? 1 : 0;
-        // lock_service->characteristics()[1]->set_value(new_state);
-        // lock_service->characteristics()[0]->set_value(new_state);
         g_server->tick();
     }
 

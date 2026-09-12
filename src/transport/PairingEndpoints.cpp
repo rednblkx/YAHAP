@@ -87,14 +87,14 @@ Response PairingEndpoints::handle_pair_verify(const Request& req, ConnectionCont
     if (response_tlv) {
         resp.set_body(*response_tlv);
         
-        // If verification succeeded, upgrade connection to encrypted
         if (session->is_verified()) {
-            config_.system->log(platform::System::LogLevel::Info, 
-                "[PairingEndpoints] Pair-verify succeeded - upgrading connection to encrypted");
-            ctx.upgrade_to_secure(
-                session->get_session_keys(),
-                session->get_shared_secret(),
-                session->get_controller_id());
+            // Defer the upgrade until the M4 response has been sent: the M4
+            // response itself must travel in cleartext (HAP session security
+            // starts only after Pair Verify completes).
+            pending_verify_upgrades_[ctx.connection_id()] = std::move(session);
+            pair_verify_sessions_.erase(ctx.connection_id());
+            config_.system->log(platform::System::LogLevel::Info,
+                "[PairingEndpoints] Pair-verify succeeded - upgrade pending until response is sent");
         } else {
             config_.system->log(platform::System::LogLevel::Debug, 
                 "[PairingEndpoints] Pair-verify response sent (" + std::to_string(response_tlv->size()) + " bytes)");
@@ -107,6 +107,23 @@ Response PairingEndpoints::handle_pair_verify(const Request& req, ConnectionCont
     }
     
     return resp;
+}
+
+void PairingEndpoints::complete_pair_verify(ConnectionContext& ctx) {
+    auto it = pending_verify_upgrades_.find(ctx.connection_id());
+    if (it == pending_verify_upgrades_.end()) {
+        return;
+    }
+    auto& session = it->second;
+    if (session->is_verified()) {
+        config_.system->log(platform::System::LogLevel::Info,
+            "[PairingEndpoints] Upgrading connection to encrypted after M4 response");
+        ctx.upgrade_to_secure(
+            session->get_session_keys(),
+            session->get_shared_secret(),
+            session->get_controller_id());
+    }
+    pending_verify_upgrades_.erase(it);
 }
 
 Response PairingEndpoints::handle_pairings(const Request& req, ConnectionContext& ctx) {
@@ -251,6 +268,7 @@ void PairingEndpoints::reset() {
     // Clear all session state
     pair_setup_sessions_.clear();
     pair_verify_sessions_.clear();
+    pending_verify_upgrades_.clear();
     config_.system->log(platform::System::LogLevel::Info, 
         "[PairingEndpoints] All sessions cleared");
 }

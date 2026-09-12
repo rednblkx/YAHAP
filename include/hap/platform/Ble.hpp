@@ -128,6 +128,26 @@ struct Ble {
     virtual void set_disconnect_callback(DisconnectCallback callback) = 0;
 
     /**
+     * @brief Callback type for connection established events.
+     * @param connection_id The ID of the new connection.
+     */
+    using ConnectCallback = std::function<void(uint16_t connection_id)>;
+
+    /**
+     * @brief Set a callback to be invoked when a device connects.
+     *
+     * Connectable advertising stops when a connection is established; the
+     * transport uses this to know that advertising must be restarted after
+     * the connection ends.
+     * @param callback The callback function.
+     */
+    virtual void set_connect_callback(ConnectCallback callback) {
+        // Default: no-op. Platforms that auto-stop advertising on connection
+        // should override and invoke the callback.
+        (void)callback;
+    }
+
+    /**
      * @brief Send a GATT indication to a connected client.
      * 
      * Per HAP Spec 7.4.6.1 Connected Events: When a characteristic value changes,
@@ -170,12 +190,6 @@ struct Ble {
         // Default: no-op. Platform implementations may override.
         (void)data; (void)interval_ms; (void)duration_ms;
     }
-
-    /**
-     * @brief Check if any client is currently connected.
-     * @return true if at least one client is connected.
-     */
-    virtual bool has_connections() const { return false; }
 
     /**
      * @brief Start timed advertising with automatic fallback to normal interval.

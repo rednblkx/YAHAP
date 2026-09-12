@@ -11,7 +11,6 @@ namespace hap::core {
 /**
  * @brief Manages Instance ID (IID) allocation with persistence.
  * 
- * Per HAP Spec 6.6.4:
  * - IIDs must be stable across reboots while paired
  * - IIDs for removed attributes must not be reused while paired
  * - Provides hash-based tracking for Configuration Number updates
@@ -56,11 +55,6 @@ public:
      */
     void reset();
     
-    /**
-     * @brief Get current next_iid value (for debugging).
-     */
-    uint16_t get_next_iid() const { return next_iid_; }
-
 private:
     platform::Storage* storage_;
     platform::System* system_;

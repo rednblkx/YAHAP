@@ -25,11 +25,6 @@ struct HAPValidation {
     /// Maximum accessories per bridge - BRIDGE (HAP Spec 2.5.3.2)
     static constexpr size_t kMaxAccessoriesPerBridge = 150;
     
-    /// Primary accessory must have AID=1 (HAP Spec 2.5.3.3)
-    static constexpr uint64_t kPrimaryAccessoryId = 1;
-    
-    /// Accessory Information service type (HAP Spec 9.1)
-    static constexpr uint16_t kAccessoryInfoServiceType = 0x3E;
 };
 
 /**

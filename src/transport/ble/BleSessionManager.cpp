@@ -17,10 +17,6 @@ BleSession& BleSessionManager::get_or_create(uint16_t connection_id) {
     return it->second;
 }
 
-bool BleSessionManager::has_session(uint16_t connection_id) const {
-    return sessions_.find(connection_id) != sessions_.end();
-}
-
 BleSession* BleSessionManager::get_session(uint16_t connection_id) {
     auto it = sessions_.find(connection_id);
     return it != sessions_.end() ? &it->second : nullptr;
@@ -41,11 +37,6 @@ void BleSessionManager::remove(uint16_t connection_id) {
             subscribers.end()
         );
     }
-}
-
-void BleSessionManager::clear() {
-    sessions_.clear();
-    subscriptions_.clear();
 }
 
 std::vector<uint16_t> BleSessionManager::check_timeouts() {
@@ -98,15 +89,6 @@ std::vector<uint16_t> BleSessionManager::check_timeouts() {
     }
     
     return timed_out;
-}
-
-std::vector<uint16_t> BleSessionManager::get_connection_ids() const {
-    std::vector<uint16_t> ids;
-    ids.reserve(sessions_.size());
-    for (const auto& [conn_id, _] : sessions_) {
-        ids.push_back(conn_id);
-    }
-    return ids;
 }
 
 void BleSessionManager::add_subscription(const std::string& uuid, uint16_t connection_id) {

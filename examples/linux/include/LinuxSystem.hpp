@@ -1,7 +1,10 @@
 #pragma once
 
 #include "hap/platform/System.hpp"
+#include <openssl/rand.h>
 #include <chrono>
+#include <cstdio>
+#include <mutex>
 
 namespace linux_pal {
 
@@ -14,11 +17,12 @@ public:
     }
 
     void random_bytes(std::span<uint8_t> buffer) override {
-        // Use /dev/urandom for cryptographic randomness
-        FILE* urandom = fopen("/dev/urandom", "rb");
-        if (urandom) {
-            fread(buffer.data(), 1, buffer.size(), urandom);
-            fclose(urandom);
+        // OpenSSL's RAND_bytes fails closed (and reports) rather than
+        // silently producing garbage the way a short /dev/urandom read would.
+        if (buffer.empty()) return;
+        if (RAND_bytes(buffer.data(), static_cast<int>(buffer.size())) != 1) {
+            std::fprintf(stderr, "[LinuxSystem] RAND_bytes failed\n");
+            std::abort();
         }
     }
 
@@ -34,8 +38,9 @@ public:
         
         auto now = std::chrono::system_clock::now();
         auto time_t = std::chrono::system_clock::to_time_t(now);
-        auto tm = *std::localtime(&time_t);
-        
+        std::tm tm{};
+        localtime_r(&time_t, &tm); // thread-safe variant
+
         printf("[%04d-%02d-%02d %02d:%02d:%02d] [%s] %.*s\n",
                tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
                tm.tm_hour, tm.tm_min, tm.tm_sec,

@@ -3,7 +3,7 @@
  * @brief Pre-defined HAP Characteristic types and factory functions
  * 
  * This file provides UUID constants and factory functions for all HAP-defined
- * characteristics per HomeKit Accessory Protocol Specification R13.
+ * characteristics.
  * 
  * Usage:
  *   auto brightness = hap::characteristic::Brightness();
@@ -17,7 +17,7 @@
 namespace hap::characteristic {
 
 //==============================================================================
-// Characteristic UUID Type Constants (HAP Spec R13 Section 10)
+// Characteristic UUID Type Constants
 //==============================================================================
 
 // Accessory Information
@@ -169,30 +169,6 @@ constexpr uint64_t kType_RemainingDuration = 0xD4;
 constexpr uint64_t kType_SetDuration = 0xD3;
 constexpr uint64_t kType_ValveType = 0xD5;
 
-// Camera / Video
-constexpr uint64_t kType_StreamingStatus = 0x120;
-constexpr uint64_t kType_SupportedVideoStreamConfiguration = 0x114;
-constexpr uint64_t kType_SupportedAudioStreamConfiguration = 0x115;
-constexpr uint64_t kType_SupportedRTPConfiguration = 0x116;
-constexpr uint64_t kType_SelectedRTPStreamConfiguration = 0x117;
-constexpr uint64_t kType_SelectedAudioStreamConfiguration = 0x128;
-constexpr uint64_t kType_SetupEndpoints = 0x118;
-constexpr uint64_t kType_NightVision = 0x11B;
-constexpr uint64_t kType_OpticalZoom = 0x11C;
-constexpr uint64_t kType_DigitalZoom = 0x11D;
-constexpr uint64_t kType_ImageRotation = 0x11E;
-constexpr uint64_t kType_ImageMirroring = 0x11F;
-
-// Remote / Target Control
-constexpr uint64_t kType_ActiveIdentifier = 0xE7;
-constexpr uint64_t kType_TargetControlSupportedConfiguration = 0x123;
-constexpr uint64_t kType_TargetControlList = 0x124;
-constexpr uint64_t kType_ButtonEvent = 0x126;
-
-// Data Stream
-constexpr uint64_t kType_SupportedDataStreamTransportConfiguration = 0x130;
-constexpr uint64_t kType_SetupDataStreamTransport = 0x131;
-constexpr uint64_t kType_SiriInputType = 0x132;
 
 // Misc
 constexpr uint64_t kType_AdministratorOnlyAccess = 0x01;
@@ -207,141 +183,9 @@ constexpr uint64_t kType_PairingPairings = 0x50;
 constexpr uint64_t kType_ServiceSignature = 0xA5;
 
 //==============================================================================
-// Characteristic Value Enums
-//==============================================================================
-
-enum class CurrentDoorState : uint8_t {
-    Open = 0,
-    Closed = 1,
-    Opening = 2,
-    Closing = 3,
-    Stopped = 4
-};
-
-enum class TargetDoorState : uint8_t {
-    Open = 0,
-    Closed = 1
-};
-
-enum class CurrentHeatingCoolingState : uint8_t {
-    Off = 0,
-    Heat = 1,
-    Cool = 2
-};
-
-enum class TargetHeatingCoolingState : uint8_t {
-    Off = 0,
-    Heat = 1,
-    Cool = 2,
-    Auto = 3
-};
-
-enum class TemperatureDisplayUnits : uint8_t {
-    Celsius = 0,
-    Fahrenheit = 1
-};
-
-enum class LockCurrentState : uint8_t {
-    Unsecured = 0,
-    Secured = 1,
-    Jammed = 2,
-    Unknown = 3
-};
-
-enum class LockTargetState : uint8_t {
-    Unsecured = 0,
-    Secured = 1
-};
-
-enum class RotationDirection : uint8_t {
-    Clockwise = 0,
-    CounterClockwise = 1
-};
-
-enum class CurrentFanState : uint8_t {
-    Inactive = 0,
-    Idle = 1,
-    BlowingAir = 2
-};
-
-enum class TargetFanState : uint8_t {
-    Manual = 0,
-    Auto = 1
-};
-
-enum class PositionState : uint8_t {
-    Decreasing = 0,
-    Increasing = 1,
-    Stopped = 2
-};
-
-enum class ContactSensorState : uint8_t {
-    Detected = 0,
-    NotDetected = 1
-};
-
-enum class AirQuality : uint8_t {
-    Unknown = 0,
-    Excellent = 1,
-    Good = 2,
-    Fair = 3,
-    Inferior = 4,
-    Poor = 5
-};
-
-enum class SecuritySystemCurrentState : uint8_t {
-    StayArm = 0,
-    AwayArm = 1,
-    NightArm = 2,
-    Disarmed = 3,
-    Triggered = 4
-};
-
-enum class SecuritySystemTargetState : uint8_t {
-    StayArm = 0,
-    AwayArm = 1,
-    NightArm = 2,
-    Disarm = 3
-};
-
-enum class ChargingState : uint8_t {
-    NotCharging = 0,
-    Charging = 1,
-    NotChargeable = 2
-};
-
-enum class StatusLowBattery : uint8_t {
-    Normal = 0,
-    Low = 1
-};
-
-enum class ProgrammableSwitchEvent : uint8_t {
-    SinglePress = 0,
-    DoublePress = 1,
-    LongPress = 2
-};
-
-enum class Active : uint8_t {
-    Inactive = 0,
-    Active = 1
-};
-
-enum class InUse : uint8_t {
-    NotInUse = 0,
-    InUse = 1
-};
-
-enum class ValveType : uint8_t {
-    Generic = 0,
-    Irrigation = 1,
-    ShowerHead = 2,
-    WaterFaucet = 3
-};
-
-//==============================================================================
 // Factory Functions - Returns pre-configured characteristics
 // All characteristics are returned with proper type, format, permissions,
-// and metadata (min/max values, units, step values) per HAP Specification R13.
+// and metadata (min/max values, units, step values).
 //==============================================================================
 
 // Accessory Information Characteristics

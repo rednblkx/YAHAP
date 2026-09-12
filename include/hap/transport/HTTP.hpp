@@ -84,11 +84,19 @@ public:
     void reset();
 
 private:
+    // Parser limits: a malformed peer must not be able to grow the buffers
+    // without bound (HAP requests are small JSON/TLV payloads).
+    static constexpr size_t kMaxHeaderLineLength = 8 * 1024;
+    static constexpr size_t kMaxRequestLineLength = 2 * 1024;
+    static constexpr size_t kMaxHeaderCount = 64;
+    static constexpr size_t kMaxBodyLength = 64 * 1024;
+
     enum class State {
         RequestLine,
         Headers,
         Body,
-        Complete
+        Complete,
+        Error
     };
 
     State state_;

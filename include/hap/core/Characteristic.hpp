@@ -17,9 +17,9 @@ enum class HAPStatus : int32_t;
  * @brief Response type for characteristic read/write operations.
  * 
  * Can hold either a successful value or an HAP status code indicating failure.
- * Per HAP Spec 6.7.2.3 and 6.7.4.2, characteristic operations can fail with
- * status codes like -70402 (ServiceCommunicationFailure) when physical devices
- * are unreachable.
+ * Writing Multiple Characteristics and Reading Multiple Characteristics, 
+ * characteristic operations can fail with status codes like 
+ * -70402 (ServiceCommunicationFailure) when physical devices are unreachable.
  */
 template<typename T>
 using HAPResponse = std::variant<T, HAPStatus>;
@@ -122,7 +122,7 @@ public:
      * @brief Callback for write-with-response operations.
      * 
      * Can return either a Value (success) or an HAPStatus error code.
-     * Per HAP Spec 6.7.3, used for control point characteristics.
+     * Used for control point characteristics.
      */
     using WriteResponseCallback = std::function<HAPResponse<Value>(const Value&)>;
 
@@ -137,6 +137,7 @@ public:
     uint64_t iid() const { return iid_; }
     void set_iid(uint64_t iid) { iid_ = iid; }
 
+
     /**
      * @brief Dispatcher function type for deferred callback execution.
      * 
@@ -147,13 +148,21 @@ public:
     using DispatcherFunc = std::function<void(std::function<void()>)>;
     
     /**
-     * @brief Set the global dispatcher for all characteristic callbacks.
-     * 
-     * Call this once during initialization to enable deferred execution.
+     * @brief Set the dispatcher for deferred callback execution.
+     *
+     * The server that owns this characteristic sets it during add_accessory;
+     * the dispatcher is cleared on destruction of that server's state.
      * @param dispatcher Function that queues work for later execution
      */
-    static void set_dispatcher(DispatcherFunc dispatcher) {
+    void set_dispatcher(DispatcherFunc dispatcher) {
         dispatcher_ = std::move(dispatcher);
+    }
+
+    /**
+     * @brief Clear the dispatcher (reverts to synchronous callback execution).
+     */
+    void clear_dispatcher() {
+        dispatcher_ = nullptr;
     }
     
     /**
@@ -175,14 +184,14 @@ public:
             }
         }
         
-        if (dispatcher_) {
-            Value captured_value = value_;
-            if (event_callback_ && source.type == EventSource::Type::NotifyChange) {
+        if (event_callback_ && source.type == EventSource::Type::NotifyChange) {
+            if (dispatcher_) {
+                Value captured_value = value_;
                 auto cb = event_callback_;
                 dispatcher_([cb, captured_value, source]() { cb(captured_value, source); });
+            } else {
+                event_callback_(value_, source);
             }
-        } else {
-            if (event_callback_ && source.type == EventSource::Type::NotifyChange) event_callback_(value_, source);
         }
         
         return result;
@@ -264,7 +273,7 @@ private:
     std::optional<std::vector<double>> valid_values_;  // Valid values (enum)
     std::optional<std::pair<double, double>> valid_values_range_; // Valid values range
     
-    static inline DispatcherFunc dispatcher_;
+    DispatcherFunc dispatcher_;
     
     /**
      * @brief Coerces a value to the correct variant type based on format_

@@ -3,7 +3,7 @@
  * @brief Implementation of HAP Characteristic factory functions
  * 
  * Factory functions return pre-configured characteristics with proper
- * type, format, permissions, and metadata per HAP Specification R13.
+ * type, format, permissions, and metadata.
  */
 
 #include "hap/types/CharacteristicTypes.hpp"

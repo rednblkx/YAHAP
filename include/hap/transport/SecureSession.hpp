@@ -34,11 +34,6 @@ public:
      */
     std::optional<std::vector<uint8_t>> decrypt_frame(std::span<const uint8_t> encrypted_data);
 
-    /**
-     * @brief Reset nonces (e.g., after re-verification).
-     */
-    void reset();
-
     // ===== BLE-specific methods (HAP Spec 7.4.7.2) =====
     // BLE PDU format: <encrypted PDU><16-byte authTag> (no length prefix, no AAD)
     

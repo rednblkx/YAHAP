@@ -1,4 +1,5 @@
 #include "hap/pairing/PairVerify.hpp"
+#include "hap/pairing/PairingKeys.hpp"
 #include <algorithm>
 
 namespace hap::pairing {
@@ -18,18 +19,9 @@ void PairVerify::reset() {
 }
 
 void PairVerify::load_long_term_keys() {
-    auto ltsk_data = config_.storage->get("accessory_ltsk");
-    auto ltpk_data = config_.storage->get("accessory_ltpk");
-    
-    if (ltsk_data && ltpk_data && ltsk_data->size() == 64 && ltpk_data->size() == 32) {
-        std::copy_n(ltsk_data->begin(), 64, accessory_ltsk_.begin());
-        std::copy_n(ltpk_data->begin(), 32, accessory_ltpk_.begin());
-        keys_valid_ = true;
-    } else {
-        // Per HAP spec, keys must exist from Pair Setup.
-        // If missing, the accessory is unpaired - Pair Verify must fail.
-        keys_valid_ = false;
-    }
+    // Per HAP spec, keys must exist from Pair Setup.
+    // If missing, the accessory is unpaired - Pair Verify must fail.
+    keys_valid_ = pairing::load_accessory_ltk(config_.storage, accessory_ltsk_, accessory_ltpk_);
 }
 
 std::optional<std::vector<uint8_t>> PairVerify::handle_request(std::span<const uint8_t> request_tlv) {

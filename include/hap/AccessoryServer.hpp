@@ -40,6 +40,13 @@ struct PairingEvent {
 /**
  * @brief Main HAP Accessory Server
  * Orchestrates the HAP protocol using the provided platform interfaces.
+ *
+ * @note Threading contract: AccessoryServer is NOT thread-safe. Call start(),
+ * stop(), tick(), add_accessory() and handle all platform callbacks
+ * (network receive/disconnect, BLE GATT events) from a single thread —
+ * typically the application main loop. The PAL may use its own threads
+ * internally (e.g. for mDNS), but HAP-facing callbacks must be marshalled
+ * back into that one thread before invoking server APIs.
  */
 class AccessoryServer {
 public:
@@ -69,7 +76,9 @@ public:
     AccessoryServer(Config config);
     ~AccessoryServer();
 
-    void add_accessory(std::shared_ptr<core::Accessory> accessory);
+    /// @return false if validation failed (duplicate AID, limits exceeded);
+    /// the accessory was NOT added in that case.
+    bool add_accessory(std::shared_ptr<core::Accessory> accessory);
 
     /**
      * @brief Broadcast an event notification to all subscribed controllers.

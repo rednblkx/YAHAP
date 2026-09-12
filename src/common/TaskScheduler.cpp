@@ -56,42 +56,19 @@ TaskScheduler::TaskId TaskScheduler::schedule_once(uint32_t delay_ms, TaskCallba
     return id;
 }
 
-bool TaskScheduler::cancel(TaskId id) {
-    if (id == INVALID_TASK_ID) {
-        return false;
-    }
-    
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (auto& task : tasks_) {
-        if (task.id == id && !task.cancelled) {
-            task.cancelled = true;
-            return true;
-        }
-    }
-    return false;
-}
-
-void TaskScheduler::cancel_all() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (auto& task : tasks_) {
-        task.cancelled = true;
-    }
-}
-
 void TaskScheduler::tick(uint64_t current_time_ms) {
-    std::vector<std::pair<TaskCallback, size_t>> to_execute;
-    
+    std::vector<TaskCallback> to_execute;
+
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        for (size_t i = 0; i < tasks_.size(); ++i) {
-            auto& task = tasks_[i];
+        for (auto& task : tasks_) {
             if (task.cancelled) continue;
-            
+
             if (current_time_ms >= task.next_run_ms) {
                 if (task.callback) {
-                    to_execute.emplace_back(task.callback, i);
+                    to_execute.push_back(task.callback);
                 }
-                
+
                 if (task.interval_ms > 0) {
                     task.next_run_ms = current_time_ms + task.interval_ms;
                 } else {
@@ -100,11 +77,11 @@ void TaskScheduler::tick(uint64_t current_time_ms) {
             }
         }
     }
-    
-    for (auto& [callback, index] : to_execute) {
+
+    for (auto& callback : to_execute) {
         callback();
     }
-    
+
     {
         std::lock_guard<std::mutex> lock(mutex_);
         cleanup_cancelled_tasks();

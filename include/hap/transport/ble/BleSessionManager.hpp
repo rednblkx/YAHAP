@@ -19,13 +19,11 @@ struct TransactionState {
     uint16_t transaction_id = 0;
     bool active = false;
     std::string target_uuid;                // UUID of the characteristic being written
-    uint8_t ttl = 0;                        // Timed Write TTL
     std::vector<uint8_t> response_buffer;   // Buffer for GATT Read response
     uint64_t last_activity_ms = 0;          // Timestamp of last HAP transaction
     uint64_t procedure_start_ms = 0;        // Timestamp when procedure started
     uint64_t connection_established_ms = 0; // Timestamp when connection established
     uint64_t last_write_ms = 0;             // Timestamp of last write
-    uint16_t expected_body_length = 0;      // Expected body length from PDU header
     bool gsn_incremented = false;           // Per spec: GSN increments only once per connection
     std::vector<uint8_t> timed_write_body;  // Body data pending for ExecuteWrite
     uint16_t timed_write_iid = 0;           // IID for pending timed write
@@ -72,11 +70,6 @@ public:
     BleSession& get_or_create(uint16_t connection_id);
     
     /**
-     * @brief Check if a session exists for a connection.
-     */
-    [[nodiscard]] bool has_session(uint16_t connection_id) const;
-    
-    /**
      * @brief Get an existing session (returns nullptr if not found).
      */
     [[nodiscard]] BleSession* get_session(uint16_t connection_id);
@@ -88,11 +81,6 @@ public:
     void remove(uint16_t connection_id);
     
     /**
-     * @brief Remove all sessions.
-     */
-    void clear();
-    
-    /**
      * @brief Check for session timeouts and return connections to terminate.
      * 
      * Per HAP Spec:
@@ -101,11 +89,6 @@ public:
      * - 10-second initial procedure timeout (7.5 Req #40)
      */
     [[nodiscard]] std::vector<uint16_t> check_timeouts();
-    
-    /**
-     * @brief Get all active connection IDs.
-     */
-    [[nodiscard]] std::vector<uint16_t> get_connection_ids() const;
     
     /**
      * @brief Get the number of active sessions.

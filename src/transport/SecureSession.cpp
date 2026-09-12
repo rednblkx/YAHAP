@@ -7,12 +7,6 @@ namespace hap::transport {
 SecureSession::SecureSession(platform::Crypto* crypto, std::array<uint8_t, 32> a2c, std::array<uint8_t, 32> c2a)
     : crypto_(crypto), a2c_(a2c), c2a_(c2a), write_nonce_(0), read_nonce_(0) {}
 
-void SecureSession::reset() {
-    write_nonce_ = 0;
-    read_nonce_ = 0;
-    read_buffer_.clear();
-}
-
 std::array<uint8_t, 12> SecureSession::build_nonce(uint64_t counter) {
     std::array<uint8_t, 12> nonce = {};
     // First 4 bytes are zero
@@ -25,7 +19,12 @@ std::array<uint8_t, 12> SecureSession::build_nonce(uint64_t counter) {
 
 std::vector<uint8_t> SecureSession::encrypt_frame(std::span<const uint8_t> plaintext_http) {
     // Frame format: <2-byte length><encrypted data><16-byte auth tag>
-    
+    // A frame longer than 65535 bytes cannot be represented; the caller must
+    // chunk (the AccessoryServer already splits at 1024 bytes).
+    if (plaintext_http.size() > 65535) {
+        return {};
+    }
+
     uint16_t length = static_cast<uint16_t>(plaintext_http.size());
     std::array<uint8_t, 2> length_bytes = {
         static_cast<uint8_t>(length & 0xFF),
@@ -78,17 +77,21 @@ std::optional<std::vector<uint8_t>> SecureSession::decrypt_frame(std::span<const
     std::array<uint8_t, 16> auth_tag;
     std::copy_n(read_buffer_.begin() + 2 + length, 16, auth_tag.begin());
     
-    // Decrypt
-    auto nonce = build_nonce(read_nonce_++);
+    // Decrypt. The nonce is only consumed on successful verification: a
+    // failed frame must not desynchronize the counter for subsequent frames.
+    auto nonce = build_nonce(read_nonce_);
     std::vector<uint8_t> plaintext(length);
-    
+
     if (!crypto_->chacha20_poly1305_decrypt_and_verify(
             c2a_, nonce, std::span(length_bytes),
             ciphertext, auth_tag, plaintext)) {
-        // Authentication failed - this is a security violation
+        // Authentication failed - this is a security violation. Drop all
+        // buffered data; the caller is expected to close the connection
+        // (HAP 6.5.2 requires closing the connection on decrypt failure).
         read_buffer_.clear();
         return std::nullopt;
     }
+    ++read_nonce_;
     
     // Remove processed frame from buffer
     read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + frame_size);
@@ -128,16 +131,17 @@ std::optional<std::vector<uint8_t>> SecureSession::decrypt_ble_pdu(std::span<con
     std::array<uint8_t, 16> auth_tag;
     std::copy_n(encrypted_data.data() + ciphertext_len, AUTH_TAG_SIZE, auth_tag.begin());
     
-    auto nonce = build_nonce(read_nonce_++);
+    auto nonce = build_nonce(read_nonce_);
     std::vector<uint8_t> plaintext(ciphertext_len);
     std::span<const uint8_t> empty_aad;
-    
+
     if (!crypto_->chacha20_poly1305_decrypt_and_verify(
             c2a_, nonce, empty_aad,
             ciphertext, auth_tag, plaintext)) {
         return std::nullopt;
     }
-    
+    ++read_nonce_;
+
     return plaintext;
 }
 
