@@ -294,7 +294,9 @@ Response PairingEndpoints::handle_pairings(const Request& req, ConnectionContext
                     }
                 }
 
-                // Update list
+                // Update list. The list may already be gone when the last
+                // pairing was just wiped above, so fire the callback in that
+                // case too — it drives the mDNS sf=1 (unpaired) update.
                 auto list_data = config_.storage->get("pairing_list");
                 if (list_data) {
                     bool parse_error = false;
@@ -312,6 +314,10 @@ Response PairingEndpoints::handle_pairings(const Request& req, ConnectionContext
                         if (config_.on_pairings_changed) {
                             config_.on_pairings_changed(pairing_id, ltpk_arr, false);
                         }
+                    }
+                } else if (existed) {
+                    if (config_.on_pairings_changed) {
+                        config_.on_pairings_changed(pairing_id, ltpk_arr, false);
                     }
                 }
                 
