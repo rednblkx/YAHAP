@@ -52,6 +52,12 @@ set(YAHAP_SOURCES
 # Declared before the ESP-IDF branch so both build modes see it.
 set(YAHAP_LOG_LEVEL "1" CACHE STRING "HAP log level: 0=Debug 1=Info 2=Warning 3=Error")
 
+set(YAHAP_EMBEDDED_CXX_FLAGS
+    -fno-exceptions -fno-rtti
+    -fno-unwind-tables -fno-asynchronous-unwind-tables
+    -ffunction-sections -fdata-sections
+    -fno-threadsafe-statics)
+
 if(ESP_PLATFORM)
     # Mode 2: proper ESP-IDF component.
     idf_component_register(
@@ -59,6 +65,7 @@ if(ESP_PLATFORM)
         INCLUDE_DIRS include
     )
     target_compile_definitions(${COMPONENT_LIB} PUBLIC HAP_LOG_LEVEL=${YAHAP_LOG_LEVEL})
+    target_compile_options(${COMPONENT_LIB} PUBLIC ${YAHAP_EMBEDDED_CXX_FLAGS})
     return()
 endif()
 
@@ -73,27 +80,18 @@ target_include_directories(hap PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
-# Embedded footprint: emit each function/data item into its own section so the
-# linker can drop unreferenced ones (the library ships far more service/JSON
-# surface than any single accessory uses).
-if(NOT MSVC)
-    target_compile_options(hap PRIVATE -ffunction-sections -fdata-sections)
-    if(APPLE)
-        target_link_options(hap PRIVATE -Wl,-dead_strip)
-    else()
-        target_link_options(hap PRIVATE -Wl,--gc-sections)
-    endif()
+target_compile_options(hap PUBLIC ${YAHAP_EMBEDDED_CXX_FLAGS})
+target_compile_options(hap PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+if(APPLE)
+    target_link_options(hap PRIVATE -Wl,-dead_strip)
+else()
+    target_link_options(hap PRIVATE -Wl,--gc-sections)
 endif()
 
 # Compile-time log level for the native build (the value is declared above the
 # ESP-IDF branch so both modes share it).
 target_compile_definitions(hap PUBLIC HAP_LOG_LEVEL=${YAHAP_LOG_LEVEL})
-
-if(MSVC)
-    target_compile_options(hap PRIVATE /W4 /WX)
-else()
-    target_compile_options(hap PRIVATE -Wall -Wextra -Wpedantic -Werror)
-endif()
 
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     include(CTest)

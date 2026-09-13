@@ -9,7 +9,7 @@ A modern C++20 implementation of the HomeKit Accessory Protocol (HAP) with a foc
 - **Secure Sessions**: ChaCha20-Poly1305 encrypted communication with session key derivation
 - **Platform Agnostic**: Clean abstraction layer allows porting to any platform
 - **Modern C++20**: Uses `std::span`, concepts, and modern language features
-- **Embedded-friendly**: No RTTI required; exception-free error handling via `common::Result` and status codes. No external dependencies and no exceptions anywhere.
+- **Embedded-friendly**: No RTTI, no exceptions, no external dependencies. Error handling via `common::Result` and status codes; the library is always compiled with `-fno-exceptions -fno-rtti -fno-unwind-tables -fno-threadsafe-statics`.
 
 ## Architecture
 
@@ -120,9 +120,18 @@ type (`hap/common/JsonValue.hpp`) sized for the HAP protocol surface, and all
 logging is compile-time gated by `HAP_LOG_LEVEL` (0=Debug, 1=Info [default],
 2=Warning, 3=Error — set via `-DYAHAP_LOG_LEVEL=<n>` when building the
 library; lower levels drop log strings and formatting code from the binary
-entirely). The library also compiles with `-ffunction-sections` /
-`-fdata-sections` so the linker can strip unused services and endpoints from
-the final image.
+entirely).
+
+The library compiles unconditionally with an embedded flag set (applied as
+PUBLIC compile options in both CMake and ESP-IDF component modes, so consumers
+build with a matching ABI):
+
+- `-fno-exceptions -fno-rtti` — nothing in the library throws or uses RTTI
+- `-fno-unwind-tables -fno-asynchronous-unwind-tables` — no exception unwinding data
+- `-ffunction-sections -fdata-sections` — lets the linker strip unused
+  services and endpoints from the final image (`--gc-sections` / `-dead_strip`)
+- `-fno-threadsafe-statics` — all function-local statics are
+  constant-initialized and the HAP threading contract is single-threaded
 
 The ESP32 examples consume YAHAP directly as an ESP-IDF component (symlinked
 at `examples/*/components/yahap`) and require the `yahap-pal` git submodules
@@ -136,6 +145,8 @@ The repository root is a valid ESP-IDF component. Add it to your project:
 ```bash
 mkdir -p components && ln -s /path/to/YAHAP components/yahap
 ```
+
+Requires ESP-IDF v6.x (the examples are developed against v6.1).
 
 or place/copy the repository there. The component declares its sources in the
 root `CMakeLists.txt` and has no dependencies to resolve. Then add `yahap` to
