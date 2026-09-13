@@ -3,6 +3,7 @@
 #include <span>
 #include <vector>
 #include <cstdint>
+#include <initializer_list>
 #include <optional>
 #include <string>
 
@@ -15,6 +16,7 @@ struct TLV {
     uint8_t type;
     std::vector<uint8_t> value;
 
+    TLV(uint8_t t, std::initializer_list<uint8_t> v) : type(t), value(v) {}
     TLV(uint8_t t, std::vector<uint8_t> v) : type(t), value(std::move(v)) {}
     TLV(uint8_t t, std::span<const uint8_t> v) : type(t), value(v.begin(), v.end()) {}
     TLV(uint8_t t, std::string_view v) : type(t), value(v.begin(), v.end()) {}

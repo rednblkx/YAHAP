@@ -1,7 +1,7 @@
 #pragma once
 
 #include "hap/platform/Storage.hpp"
-#include <nlohmann/json.hpp>
+#include "hap/common/JsonValue.hpp"
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -21,7 +21,6 @@ public:
     void set(std::string_view key, std::span<const uint8_t> value) override {
         std::lock_guard<std::mutex> lock(mutex_);
         
-        // Convert to hex string for JSON storage
         std::string hex_value;
         hex_value.reserve(value.size() * 2);
         for (uint8_t byte : value) {
@@ -42,7 +41,6 @@ public:
             return std::nullopt;
         }
         
-        // Convert from hex string
         const std::string& hex = it->second;
         std::vector<uint8_t> result;
         result.reserve(hex.size() / 2);
@@ -77,23 +75,25 @@ private:
     void load() {
         std::ifstream file(filename_);
         if (file.is_open()) {
-            try {
-                nlohmann::json j;
-                file >> j;
-                data_ = j.get<std::map<std::string, std::string>>();
-            } catch (...) {
-                // Invalid JSON: start fresh, but say so — silent corruption
-                // would silently unpair the accessory.
+            std::string text((std::istreambuf_iterator<char>(file)),
+                             std::istreambuf_iterator<char>());
+            bool error = false;
+            hap::common::JsonValue j = hap::common::JsonValue::parse(text, &error);
+            if (error || !j.is_object()) {
                 std::cerr << "[LinuxStorage] Corrupt or unreadable storage file '"
                           << filename_ << "', starting fresh" << std::endl;
                 data_.clear();
+                return;
+            }
+            for (const auto& [key, value] : j.members()) {
+                if (value.is_string()) {
+                    data_[key] = value.as_string();
+                }
             }
         }
     }
 
     void save() {
-        // Write to a temp file then rename: a crash mid-write must not
-        // corrupt the live pairing data.
         std::string tmp = filename_ + ".tmp";
         {
             std::ofstream file(tmp);
@@ -101,8 +101,11 @@ private:
                 std::cerr << "[LinuxStorage] Cannot open " << tmp << " for writing" << std::endl;
                 return;
             }
-            nlohmann::json j = data_;
-            file << j.dump(2);
+            hap::common::JsonValue j = hap::common::JsonValue::object();
+            for (const auto& [key, value] : data_) {
+                j.set(key, value);
+            }
+            file << j.dump();
             file.flush();
             if (!file.good()) {
                 std::cerr << "[LinuxStorage] Write failed for " << tmp << std::endl;

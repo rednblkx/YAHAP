@@ -74,6 +74,8 @@ public:
     const JsonValue* find(std::string_view key) const;
     bool contains(std::string_view key) const { return find(key) != nullptr; }
     void erase(std::string_view key);
+    // Object members in insertion order; empty for non-objects.
+    const Object& members() const { return obj_; }
 
     // ---- serialization ----
     // Serializes to minimal JSON (no whitespace). Numbers that are integral
