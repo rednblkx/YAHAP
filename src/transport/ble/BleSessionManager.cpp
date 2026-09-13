@@ -86,15 +86,15 @@ std::vector<uint16_t> BleSessionManager::check_timeouts() {
     return timed_out;
 }
 
-void BleSessionManager::add_subscription(const std::string& uuid, uint16_t connection_id) {
-    auto& subscribers = subscriptions_[uuid];
+void BleSessionManager::add_subscription(uint16_t char_type, uint16_t connection_id) {
+    auto& subscribers = subscriptions_[char_type];
     if (std::find(subscribers.begin(), subscribers.end(), connection_id) == subscribers.end()) {
         subscribers.push_back(connection_id);
     }
 }
 
-void BleSessionManager::remove_subscription(const std::string& uuid, uint16_t connection_id) {
-    auto it = subscriptions_.find(uuid);
+void BleSessionManager::remove_subscription(uint16_t char_type, uint16_t connection_id) {
+    auto it = subscriptions_.find(char_type);
     if (it != subscriptions_.end()) {
         auto& subscribers = it->second;
         subscribers.erase(
@@ -104,13 +104,13 @@ void BleSessionManager::remove_subscription(const std::string& uuid, uint16_t co
     }
 }
 
-const std::vector<uint16_t>& BleSessionManager::get_subscribers(const std::string& uuid) const {
-    auto it = subscriptions_.find(uuid);
+const std::vector<uint16_t>& BleSessionManager::get_subscribers(uint16_t char_type) const {
+    auto it = subscriptions_.find(char_type);
     return it != subscriptions_.end() ? it->second : kEmptySubscribers;
 }
 
-bool BleSessionManager::has_subscribers(const std::string& uuid) const {
-    auto it = subscriptions_.find(uuid);
+bool BleSessionManager::has_subscribers(uint16_t char_type) const {
+    auto it = subscriptions_.find(char_type);
     return it != subscriptions_.end() && !it->second.empty();
 }
 

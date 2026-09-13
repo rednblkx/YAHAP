@@ -37,18 +37,45 @@ namespace {
 // Pair Verify 0x4E, Pairing Features 0x4F) work without an encrypted session;
 // every other characteristic requires one. Named predicate instead of UUID
 // string parsing scattered over call sites.
-bool characteristic_requires_encryption(const std::string& uuid) {
-    // HAP base UUID short form lives at chars 4-7 of "0000XXXX-...".
-    if (uuid.size() < 8) return true;
-    static const std::array<std::string_view, 3> kUnsecured = {"4C", "4E", "4F"};
-    std::string_view short_uuid(uuid.data() + 4, 4);
-    for (auto u : kUnsecured) {
-        if (short_uuid == "000" + std::string(u)) return false;
+bool characteristic_requires_encryption(uint16_t char_type) {
+    // Only the unauthenticated pairing characteristics (Pair Setup 0x4C,
+    // Pair Verify 0x4E, Pairing Features 0x4F) work without an encrypted
+    // session; everything else requires one (HAP-BLE 7.3.5.2).
+    switch (char_type) {
+        case 0x4C:
+        case 0x4E:
+        case 0x4F:
+            return false;
+        default:
+            return true;
     }
-    return true;
 }
 } // namespace
 } // namespace
+
+// Formats a 16-bit short type as 4 uppercase hex digits (for logs).
+[[maybe_unused]] static const char* hex4(uint16_t v) {
+    static const char* kHex = "0123456789ABCDEF";
+    static char buf[5];
+    buf[0] = kHex[(v >> 12) & 0xF];
+    buf[1] = kHex[(v >> 8) & 0xF];
+    buf[2] = kHex[(v >> 4) & 0xF];
+    buf[3] = kHex[v & 0xF];
+    buf[4] = '\0';
+    return buf;
+}
+
+// Builds the full 128-bit HAP UUID string for a 16-bit short type
+// ("0000XXXX-0000-1000-8000-0026BB765291") — only needed at the PAL boundary.
+static std::string type_to_uuid_str(uint16_t type) {
+    static const char* kHex = "0123456789ABCDEF";
+    std::string uuid = "0000____-0000-1000-8000-0026BB765291";
+    uuid[4] = kHex[(type >> 12) & 0xF];
+    uuid[5] = kHex[(type >> 8) & 0xF];
+    uuid[6] = kHex[(type >> 4) & 0xF];
+    uuid[7] = kHex[type & 0xF];
+    return uuid;
+}
 
 [[maybe_unused]] static std::string to_hex_string(const uint8_t* data, size_t len) {
     static const char* kHex = "0123456789ABCDEF";
@@ -156,8 +183,8 @@ void BleTransport::add_pairing_characteristic(
     def.uuid = uuid;
     def.properties.read = true;
     def.properties.write = true;
-    def.on_write = [this, uuid](uint16_t conn, std::span<const uint8_t> data, bool) {
-        handle_hap_write(conn, uuid, data);
+    def.on_write = [this, char_type](uint16_t conn, std::span<const uint8_t> data, bool) {
+        handle_hap_write(conn, char_type, data);
     };
     def.on_read = [this](uint16_t conn) {
         return handle_hap_read(conn);
@@ -369,12 +396,12 @@ void BleTransport::check_session_timeouts() {
     }
 }
 
-void BleTransport::handle_hap_write_with_id(uint16_t connection_id, std::string uuid, std::span<const uint8_t> data) {
-    HAP_LOG(config_.system, "[BleTransport] Write to Char UUID: ", uuid);
-    handle_hap_write(connection_id, uuid, data);
+void BleTransport::handle_hap_write_with_id(uint16_t connection_id, uint16_t char_type, std::span<const uint8_t> data) {
+    HAP_LOG(config_.system, "[BleTransport] Write to Char Type: 0x", hex4(char_type));
+    handle_hap_write(connection_id, char_type, data);
 }
 
-void BleTransport::handle_hap_write(uint16_t connection_id, const std::string& uuid, std::span<const uint8_t> data) {
+void BleTransport::handle_hap_write(uint16_t connection_id, uint16_t char_type, std::span<const uint8_t> data) {
     if (data.empty()) return;
     
     HAP_LOG(config_.system, "[BleTransport] Write PDU Fragment (", data.size(), " bytes): ", to_hex_string(data.data(), data.size()));
@@ -385,7 +412,7 @@ void BleTransport::handle_hap_write(uint16_t connection_id, const std::string& u
         session_is_secured = session->context->is_encrypted();
     }
     
-    const bool requires_encryption = characteristic_requires_encryption(uuid);
+    const bool requires_encryption = characteristic_requires_encryption(char_type);
 
     std::vector<uint8_t> decrypted_data;
     std::span<const uint8_t> working_data = data;
@@ -431,7 +458,7 @@ void BleTransport::handle_hap_write(uint16_t connection_id, const std::string& u
         auto& state = session_manager_->get_or_create(connection_id).transaction;
         state.opcode = opcode;
         state.transaction_id = tid;
-        state.target_uuid = uuid;
+        state.target_char_type = char_type;
         state.buffer.clear();
         state.response_buffer.clear();
         state.active = true;
@@ -579,8 +606,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
 
     // Pair Verify (0x4E) responses complete Pair Verify; the security upgrade
     // must happen only after the M4 response has been queued (see below).
-    const bool is_pair_verify_write =
-        state.target_uuid == "0000004E-0000-1000-8000-0026BB765291";
+    const bool is_pair_verify_write = state.target_char_type == 0x4E;
 
     HAP_LOG_INFO(config_.system, "[BleTransport] Processing Opcode ", (int)opcode, " TID=", tid);
     
@@ -657,7 +683,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
             HAP_LOG_INFO(config_.system, "[BleTransport] Service Signature Read IID=", iid, " Primary=", is_primary);
         }
         
-        send_response(connection_id, state.transaction_id, state.target_uuid, 0x00, sig_response);
+        send_response(connection_id, state.transaction_id, state.target_char_type, 0x00, sig_response);
         return;
     }
     
@@ -675,7 +701,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
              HAP_LOG(config_.system, "[BleTransport] Signature Response: ", to_hex_string(sig_response.data(), sig_response.size()));
         }
         
-        send_response(connection_id, state.transaction_id, state.target_uuid, status, sig_response);
+        send_response(connection_id, state.transaction_id, state.target_char_type, status, sig_response);
         return;
     }
 
@@ -734,7 +760,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
             }
         }
         
-        send_response(connection_id, state.transaction_id, state.target_uuid, status, value_bytes);
+        send_response(connection_id, state.transaction_id, state.target_char_type, status, value_bytes);
     }
     else if (opcode == PDUOpcode::CharacteristicWrite) {
         uint8_t status = 0x00;
@@ -823,7 +849,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                      core::Value new_value;
                      if (!decode_ble_value(ch->format(), *value_tlv, new_value)) {
                          HAP_LOG_WARN(config_.system, "[BleTransport] Write IID=", iid, " - value too short for format");
-                         send_response(connection_id, state.transaction_id, state.target_uuid, 0x06, {});
+                         send_response(connection_id, state.transaction_id, state.target_char_type, 0x06, {});
                          return;
                      }
                      
@@ -882,7 +908,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
              }
         }
 
-        send_response(connection_id, state.transaction_id, state.target_uuid, status, response_body);
+        send_response(connection_id, state.transaction_id, state.target_char_type, status, response_body);
 
         // The M4 response was just queued in cleartext; only now may the
         // session switch to encrypted (HAP: security starts after PV ends).
@@ -899,7 +925,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         
         HAP_LOG_INFO(config_.system, "[BleTransport] Timed Write stored for IID=", iid, " Body size=", body.size());
         
-        send_response(connection_id, state.transaction_id, state.target_uuid, 0x00, {});
+        send_response(connection_id, state.transaction_id, state.target_char_type, 0x00, {});
     }
     else if (opcode == PDUOpcode::CharacteristicExecuteWrite) {
         uint8_t status = 0x00;
@@ -977,7 +1003,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                         if (!decode_ble_value(ch->format(), *value_tlv, new_value)) {
                             HAP_LOG_WARN(config_.system, "[BleTransport] Execute Timed Write IID=", state.timed_write_iid, " - value too short for format");
                             status = 0x06; // Invalid Request
-                            send_response(connection_id, state.transaction_id, state.target_uuid, status, response_body);
+                            send_response(connection_id, state.transaction_id, state.target_char_type, status, response_body);
                             state.timed_write_body.clear();
                             state.timed_write_iid = 0;
                             return;
@@ -1016,7 +1042,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
             state.timed_write_iid = 0;
         }
         
-        send_response(connection_id, state.transaction_id, state.target_uuid, status, response_body);
+        send_response(connection_id, state.transaction_id, state.target_char_type, status, response_body);
     }
     else if (opcode == PDUOpcode::CharacteristicConfiguration) {
         // HAP-Characteristic-Configuration-Request/Response
@@ -1063,7 +1089,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         
         HAP_LOG_INFO(config_.system, "[BleTransport] Characteristic Configuration IID=", iid, " Props=", properties, " Interval=", broadcast_interval, " BroadcastEnabled=", broadcast_enabled);
         
-        send_response(connection_id, state.transaction_id, state.target_uuid, status, response_body);
+        send_response(connection_id, state.transaction_id, state.target_char_type, status, response_body);
     }
     else if (opcode == PDUOpcode::ProtocolConfiguration) {
         // HAP-Protocol-Configuration-Request/Response
@@ -1153,14 +1179,14 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         
         HAP_LOG_INFO(config_.system, "[BleTransport] Protocol Configuration completed");
         
-        send_response(connection_id, state.transaction_id, state.target_uuid, status, response_body);
+        send_response(connection_id, state.transaction_id, state.target_char_type, status, response_body);
     }
     else {
-        send_response(connection_id, state.transaction_id, state.target_uuid, 0x01, {});
+        send_response(connection_id, state.transaction_id, state.target_char_type, 0x01, {});
     }
 }
 
-void BleTransport::send_response(uint16_t conn_id, uint16_t tid, const std::string& uuid, uint8_t status, std::span<const uint8_t> body) {
+void BleTransport::send_response(uint16_t conn_id, uint16_t tid, uint16_t char_type, uint8_t status, std::span<const uint8_t> body) {
     std::vector<uint8_t> packet = ble::HapPdu::build_response(tid, status, body);
     
     bool session_is_secured = false;
@@ -1169,7 +1195,7 @@ void BleTransport::send_response(uint16_t conn_id, uint16_t tid, const std::stri
         session_is_secured = session_ptr->context->is_encrypted();
     }
     
-    const bool requires_encryption = characteristic_requires_encryption(uuid);
+    const bool requires_encryption = characteristic_requires_encryption(char_type);
 
     if (session_is_secured && requires_encryption) {
         auto& ctx = *session_ptr->context;
@@ -1318,18 +1344,6 @@ void BleTransport::register_user_services() {
 
 void BleTransport::register_services_by_type(uint16_t filter_type) {
     if (!config_.database) return;
-    auto type_to_uuid_str = [](uint64_t type) {
-        // HAP base UUID: "0000XXXX-0000-1000-8000-0026BB765291"
-        static const char* kHex = "0123456789ABCDEF";
-        std::string uuid = "0000____-0000-1000-8000-0026BB765291";
-        uint16_t t = static_cast<uint16_t>(type & 0xFFFF);
-        uuid[4] = kHex[(t >> 12) & 0xF];
-        uuid[5] = kHex[(t >> 8) & 0xF];
-        uuid[6] = kHex[(t >> 4) & 0xF];
-        uuid[7] = kHex[t & 0xF];
-        return uuid;
-    };
-
     for (const auto& acc : config_.database->accessories()) {
         for (const auto& svc : acc->services()) {
             uint16_t svc_type = svc->type() & 0xFFFF;
@@ -1341,7 +1355,7 @@ void BleTransport::register_services_by_type(uint16_t filter_type) {
             uint16_t svc_iid = static_cast<uint16_t>(svc->iid());
 
             platform::Ble::ServiceDefinition def;
-            def.uuid = type_to_uuid_str(svc->type());
+            def.uuid = type_to_uuid_str(static_cast<uint16_t>(svc->type() & 0xFFFF));
             // HAP Spec 7.4.1: All HAP services must be primary GATT services.
             def.is_primary = true;
             
@@ -1378,11 +1392,11 @@ void BleTransport::register_services_by_type(uint16_t filter_type) {
                 // Use IID already assigned by AttributeDatabase (via IIDManager)
                 uint16_t char_iid = static_cast<uint16_t>(ch->iid());
 
-                std::string char_uuid = type_to_uuid_str(ch->type());
+                std::string char_uuid = type_to_uuid_str(static_cast<uint16_t>(ch->type() & 0xFFFF));
                 platform::Ble::CharacteristicDefinition cdef;
                 cdef.uuid = char_uuid;
                 
-                instance_map_[{acc->aid(), ch->iid()}] = char_uuid;
+                instance_map_[{acc->aid(), ch->iid()}] = static_cast<uint16_t>(ch->type() & 0xFFFF);
                 
                 auto perms = ch->permissions();
                 cdef.properties.read = true;
@@ -1408,16 +1422,16 @@ void BleTransport::register_services_by_type(uint16_t filter_type) {
                     return handle_hap_read(conn_id);
                 };
                 
-                cdef.on_write = [this, uuid=char_uuid](uint16_t conn_id, std::span<const uint8_t> data, bool response) {
+                cdef.on_write = [this, char_type = static_cast<uint16_t>(ch->type() & 0xFFFF)](uint16_t conn_id, std::span<const uint8_t> data, bool response) {
                     (void)response;
-                    handle_hap_write_with_id(conn_id, uuid, data);
+                    handle_hap_write_with_id(conn_id, char_type, data);
                 };
                 
-                cdef.on_subscribe = [this, uuid=char_uuid](uint16_t conn_id, bool enabled) {
+                cdef.on_subscribe = [this, char_type = static_cast<uint16_t>(ch->type() & 0xFFFF)](uint16_t conn_id, bool enabled) {
                      if (enabled) {
-                         session_manager_->add_subscription(uuid, conn_id);
+                         session_manager_->add_subscription(char_type, conn_id);
                      } else {
-                         session_manager_->remove_subscription(uuid, conn_id);
+                         session_manager_->remove_subscription(char_type, conn_id);
                      }
                 };
 
@@ -1509,14 +1523,14 @@ void BleTransport::handle_characteristic_change(uint64_t aid, uint64_t iid,
         HAP_LOG_WARN(config_.system, "[BleTransport] No UUID mapping for IID=", iid);
         return;
     }
-    std::string uuid = it->second;
+    uint16_t char_type = it->second;
     
     // exclude_conn_id == kNoConnectionExclusion (0) means "notify everyone";
     // otherwise skip the connection that caused the change. Note BLE connection
     // IDs start at 0, so the sentinel must be checked explicitly.
     bool has_connected_subscribers = false;
-    if (session_manager_->has_subscribers(uuid)) {
-        for (uint16_t conn_id : session_manager_->get_subscribers(uuid)) {
+    if (session_manager_->has_subscribers(char_type)) {
+        for (uint16_t conn_id : session_manager_->get_subscribers(char_type)) {
             if (exclude_conn_id == kNoConnectionExclusion || conn_id != exclude_conn_id) {
                 has_connected_subscribers = true;
                 break;
@@ -1548,27 +1562,28 @@ void BleTransport::send_connected_event(uint16_t iid) {
     // Per HAP Spec 7.4.6.1 Connected Events:
     // Send a ZERO-LENGTH indication to controllers that registered for indications.
     
-    std::string uuid;
+    uint16_t char_type = 0;
     for (const auto& [key, val] : instance_map_) {
         if (key.second == iid) {
-            uuid = val;
+            char_type = val;
             break;
         }
     }
     
-    if (uuid.empty()) {
+    if (char_type == 0) {
         HAP_LOG_WARN(config_.system, "[BleTransport] Cannot send Connected Event - no UUID for IID=", iid);
         return;
     }
     
-    if (!session_manager_->has_subscribers(uuid)) {
+    if (!session_manager_->has_subscribers(char_type)) {
         HAP_LOG(config_.system, "[BleTransport] No subscribers for Connected Event IID=", iid);
         return;
     }
     
     std::vector<uint8_t> empty_indication;
+    std::string uuid = type_to_uuid_str(char_type);
     
-    for (uint16_t conn_id : session_manager_->get_subscribers(uuid)) {
+    for (uint16_t conn_id : session_manager_->get_subscribers(char_type)) {
         HAP_LOG(config_.system, "[BleTransport] Sending zero-length indication to conn=", conn_id, " for IID=", iid);
         
         config_.ble->send_indication(conn_id, uuid, empty_indication);

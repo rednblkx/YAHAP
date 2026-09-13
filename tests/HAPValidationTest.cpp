@@ -77,7 +77,7 @@ void test_too_many_characteristics_fails() {
     // Add 101 characteristics (exceeds limit of 100)
     for (int i = 0; i < 101; ++i) {
         auto ch = std::make_shared<Characteristic>(
-            0x100 + i, Format::Bool, std::vector{Permission::PairedRead});
+            0x100 + i, Format::Bool, Permissions{Permission::PairedRead});
         svc->add_characteristic(ch);
     }
     acc->add_service(svc);

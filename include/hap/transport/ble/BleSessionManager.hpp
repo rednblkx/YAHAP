@@ -18,7 +18,7 @@ struct TransactionState {
     PDUOpcode opcode = PDUOpcode::CharacteristicRead;
     uint16_t transaction_id = 0;
     bool active = false;
-    std::string target_uuid;                // UUID of the characteristic being written
+    uint16_t target_char_type = 0;          // Short-form type of the characteristic being written
     std::vector<uint8_t> response_buffer;   // Buffer for GATT Read response
     uint64_t last_activity_ms = 0;          // Timestamp of last HAP transaction
     uint64_t procedure_start_ms = 0;        // Timestamp when procedure started
@@ -100,27 +100,27 @@ public:
     /**
      * @brief Add a subscription for a connection.
      */
-    void add_subscription(const std::string& uuid, uint16_t connection_id);
+    void add_subscription(uint16_t char_type, uint16_t connection_id);
     
     /**
      * @brief Remove a subscription for a connection.
      */
-    void remove_subscription(const std::string& uuid, uint16_t connection_id);
+    void remove_subscription(uint16_t char_type, uint16_t connection_id);
     
     /**
      * @brief Get all subscribers for a UUID.
      */
-    [[nodiscard]] const std::vector<uint16_t>& get_subscribers(const std::string& uuid) const;
+    [[nodiscard]] const std::vector<uint16_t>& get_subscribers(uint16_t char_type) const;
     
     /**
      * @brief Check if a UUID has any subscribers.
      */
-    [[nodiscard]] bool has_subscribers(const std::string& uuid) const;
+    [[nodiscard]] bool has_subscribers(uint16_t char_type) const;
 
 private:
     platform::System* system_;
     std::map<uint16_t, BleSession> sessions_;
-    std::map<std::string, std::vector<uint16_t>> subscriptions_;
+    std::map<uint16_t, std::vector<uint16_t>> subscriptions_;
     
     static constexpr uint64_t kIdleTimeoutMs = 30000;      // 30 seconds
     static constexpr uint64_t kProcedureTimeoutMs = 10000; // 10 seconds

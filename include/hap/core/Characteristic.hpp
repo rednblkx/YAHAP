@@ -6,6 +6,7 @@
 #include <functional>
 #include <optional>
 #include <cstdint>
+#include <initializer_list>
 #include <type_traits>
 
 namespace hap::core {
@@ -64,15 +65,53 @@ enum class Format {
 /**
  * @brief HAP Characteristic Permissions
  */
-enum class Permission {
-    PairedRead,
-    PairedWrite,
-    Notify,
-    AdditionalAuthorization,
-    TimedWrite,
-    Hidden,
-    WriteResponse,
-    Broadcast
+enum class Permission : uint8_t {
+    PairedRead = 0,
+    PairedWrite = 1,
+    Notify = 2,
+    AdditionalAuthorization = 3,
+    TimedWrite = 4,
+    Hidden = 5,
+    WriteResponse = 6,
+    Broadcast = 7
+};
+
+/**
+ * @brief Compact permission set (1 byte instead of a heap-allocated vector).
+ *
+ * Implicitly constructible from an initializer list so call sites can keep
+ * writing `Characteristic(type, format, {Permission::PairedRead, ...})`.
+ */
+class Permissions {
+public:
+    constexpr Permissions() = default;
+    constexpr Permissions(std::initializer_list<Permission> perms) {
+        for (Permission p : perms) bits_ |= mask(p);
+    }
+
+    constexpr bool has(Permission p) const { return (bits_ & mask(p)) != 0; }
+    void add(Permission p) { bits_ |= mask(p); }
+
+    constexpr uint8_t raw() const { return bits_; }
+    static constexpr Permissions from_raw(uint8_t bits) { Permissions set; set.bits_ = bits; return set; }
+
+    // Iteration over the set bits, in Permission enum order — lets existing
+    // range-for code (JSON perms list, BLE property mapping) work unchanged.
+    class iterator {
+    public:
+        explicit iterator(uint8_t bits) : bits_(bits) {}
+        Permission operator*() const { return static_cast<Permission>(__builtin_ctz(bits_)); }
+        iterator& operator++() { bits_ &= bits_ - 1; return *this; }
+        bool operator!=(const iterator& other) const { return bits_ != other.bits_; }
+    private:
+        uint8_t bits_;
+    };
+    iterator begin() const { return iterator(bits_); }
+    iterator end() const { return iterator(0); }
+
+private:
+    static constexpr uint8_t mask(Permission p) { return static_cast<uint8_t>(1u << static_cast<uint8_t>(p)); }
+    uint8_t bits_ = 0;
 };
 
 /**
@@ -126,14 +165,18 @@ public:
      */
     using WriteResponseCallback = std::function<HAPResponse<Value>(const Value&)>;
 
-    Characteristic(uint64_t type, Format format, std::vector<Permission> permissions)
-        : type_(type), format_(format), permissions_(std::move(permissions)) {}
+    Characteristic(uint64_t type, Format format, Permissions permissions)
+        : type_(type), format_(format), permissions_(permissions) {}
+    Characteristic(uint64_t type, Format format, std::initializer_list<Permission> permissions)
+        : type_(type), format_(format) {
+        for (Permission p : permissions) permissions_.add(p);
+    }
 
     virtual ~Characteristic() = default;
 
     uint64_t type() const { return type_; }
     Format format() const { return format_; }
-    const std::vector<Permission>& permissions() const { return permissions_; }
+    const Permissions& permissions() const { return permissions_; }
     uint64_t iid() const { return iid_; }
     void set_iid(uint64_t iid) { iid_ = iid; }
 
@@ -218,7 +261,7 @@ public:
 private:
     uint64_t type_;
     Format format_;
-    std::vector<Permission> permissions_;
+    Permissions permissions_;
     uint64_t iid_ = 0;
     
     Value value_;

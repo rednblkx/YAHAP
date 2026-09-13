@@ -750,7 +750,7 @@ SecuritySystemBuilder& SecuritySystemBuilder::with_name(std::string name) {
 SecuritySystemBuilder& SecuritySystemBuilder::with_alarm_type() {
     auto alarm_type = std::make_shared<Characteristic>(
         chr::kType_SecuritySystemAlarmType, Format::UInt8,
-        std::vector{Permission::PairedRead, Permission::Notify}
+        Permissions{Permission::PairedRead, Permission::Notify}
     );
     alarm_type->set_min_value(0);
     alarm_type->set_max_value(1);

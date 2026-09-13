@@ -237,7 +237,7 @@ void test_serializer_short_input_errors() {
 
 void test_characteristic_coercion() {
     using namespace hap::core;
-    Characteristic c(0x25, Format::UInt8, std::vector{Permission::PairedWrite});
+    Characteristic c(0x25, Format::UInt8, Permissions{Permission::PairedWrite});
 
     c.set_value(42); // int literal coerces to uint8_t
     auto v = c.get_value();
@@ -248,7 +248,7 @@ void test_characteristic_coercion() {
 void test_characteristic_write_callback_result() {
     using namespace hap::core;
 
-    Characteristic c(0x25, Format::Bool, std::vector{Permission::PairedWrite});
+    Characteristic c(0x25, Format::Bool, Permissions{Permission::PairedWrite});
     int calls = 0;
     c.set_write_callback([&calls](const Value&) -> WriteResponse {
         ++calls;

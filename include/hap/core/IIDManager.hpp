@@ -2,7 +2,7 @@
 
 #include "hap/platform/Storage.hpp"
 #include "hap/platform/System.hpp"
-#include <map>
+#include <vector>
 #include <string>
 #include <cstdint>
 
@@ -58,11 +58,21 @@ public:
 private:
     platform::Storage* storage_;
     platform::System* system_;
-    std::map<std::string, uint16_t> iid_map_;
+
+    // Flat sorted vector of (key, iid): the map has ~2 entries per service/char
+    // and a std::map node costs ~48 bytes + a heap block per entry; a sorted
+    // vector halves that and is faster to look up at this size.
+    struct IidEntry {
+        std::string key;
+        uint16_t iid;
+        bool operator<(const IidEntry& other) const { return key < other.key; }
+    };
+    std::vector<IidEntry> iid_map_;
     uint16_t next_iid_ = 1;
     bool dirty_ = false;  // Track if save is needed
-    
+
     void load();
+    std::vector<IidEntry>::iterator find_entry(const std::string& key);
 };
 
 } // namespace hap::core

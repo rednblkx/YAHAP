@@ -409,7 +409,7 @@ void test_timed_write_fires_connected_event() {
     auto svc = std::make_shared<core::Service>(0x43, "Lightbulb");
     auto on_char = std::make_shared<core::Characteristic>(
         0x25, core::Format::Bool,
-        std::vector{core::Permission::PairedRead, core::Permission::PairedWrite,
+        core::Permissions{core::Permission::PairedRead, core::Permission::PairedWrite,
                     core::Permission::Notify, core::Permission::TimedWrite});
     svc->add_characteristic(on_char);
     acc->add_service(svc);

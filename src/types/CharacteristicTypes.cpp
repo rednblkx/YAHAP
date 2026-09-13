@@ -16,12 +16,12 @@ using namespace hap::core;
 //==============================================================================
 // Helper macros for common permission patterns
 //==============================================================================
-#define PERM_PR     std::vector{Permission::PairedRead}
-#define PERM_PW     std::vector{Permission::PairedWrite}
-#define PERM_PR_NT  std::vector{Permission::PairedRead, Permission::Notify}
-#define PERM_PR_PW  std::vector{Permission::PairedRead, Permission::PairedWrite}
-#define PERM_PR_PW_NT std::vector{Permission::PairedRead, Permission::PairedWrite, Permission::Notify}
-#define PERM_PR_PW_WR std::vector{Permission::PairedRead, Permission::PairedWrite, Permission::WriteResponse}
+#define PERM_PR     Permissions{Permission::PairedRead}
+#define PERM_PW     Permissions{Permission::PairedWrite}
+#define PERM_PR_NT  Permissions{Permission::PairedRead, Permission::Notify}
+#define PERM_PR_PW  Permissions{Permission::PairedRead, Permission::PairedWrite}
+#define PERM_PR_PW_NT Permissions{Permission::PairedRead, Permission::PairedWrite, Permission::Notify}
+#define PERM_PR_PW_WR Permissions{Permission::PairedRead, Permission::PairedWrite, Permission::WriteResponse}
 
 //==============================================================================
 // Accessory Information Characteristics
@@ -595,7 +595,7 @@ std::shared_ptr<Characteristic> Mute() {
 std::shared_ptr<Characteristic> ProgrammableSwitchEventChar() {
     // Note: This characteristic is event-only (null value allowed)
     auto c = std::make_shared<Characteristic>(kType_ProgrammableSwitchEvent, Format::UInt8, 
-        std::vector{Permission::PairedRead, Permission::Notify});
+        Permissions{Permission::PairedRead, Permission::Notify});
     c->set_min_value(0);
     c->set_max_value(2);
     return c;

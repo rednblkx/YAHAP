@@ -109,7 +109,7 @@ private:
     std::unique_ptr<ble::BleSessionManager> session_manager_;
 
     // Mapping (AID, IID) -> Characteristic UUID
-    std::map<std::pair<uint64_t, uint64_t>, std::string> instance_map_;
+    std::map<std::pair<uint64_t, uint64_t>, uint16_t> instance_map_;  // (aid, iid) -> short char type
     
     struct CharacteristicMetadata {
         uint16_t instance_id;     // Characteristic IID
@@ -157,14 +157,14 @@ private:
     void increment_gsn();
     uint16_t get_current_gsn();
     
-    void handle_hap_write(uint16_t connection_id, const std::string& uuid, std::span<const uint8_t> data);
-    void handle_hap_write_with_id(uint16_t connection_id, std::string uuid, std::span<const uint8_t> data);
+    void handle_hap_write(uint16_t connection_id, uint16_t char_type, std::span<const uint8_t> data);
+    void handle_hap_write_with_id(uint16_t connection_id, uint16_t char_type, std::span<const uint8_t> data);
     std::vector<uint8_t> handle_hap_read(uint16_t connection_id);
     
     void process_transaction(uint16_t connection_id, ble::TransactionState& state);
     std::vector<uint8_t> process_signature_read(uint16_t connection_id, uint16_t iid);
 
-    void send_response(uint16_t conn_id, uint16_t tid, const std::string& uuid, uint8_t status, std::span<const uint8_t> body);
+    void send_response(uint16_t conn_id, uint16_t tid, uint16_t char_type, uint8_t status, std::span<const uint8_t> body);
     
     /**
      * @brief Handle characteristic change and dispatch appropriate event type.

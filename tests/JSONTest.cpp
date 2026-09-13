@@ -12,7 +12,7 @@ void test_characteristic_json() {
     auto c = std::make_shared<Characteristic>(
         0x23, // Name characteristic type
         Format::String,
-        std::vector{Permission::PairedRead}
+        Permissions{Permission::PairedRead}
     );
     c->set_value(std::string("Test Device"));
 
@@ -55,7 +55,7 @@ void test_multi_accessory_json() {
     auto acc1 = std::make_shared<Accessory>(1);
     auto svc1 = std::make_shared<Service>(0x3E, "Bridge");
 
-    auto name_char = std::make_shared<Characteristic>(0x23, Format::String, std::vector{Permission::PairedRead});
+    auto name_char = std::make_shared<Characteristic>(0x23, Format::String, Permissions{Permission::PairedRead});
     name_char->set_value(std::string("My Bridge"));
     svc1->add_characteristic(name_char);
 
@@ -66,7 +66,7 @@ void test_multi_accessory_json() {
     auto acc2 = std::make_shared<Accessory>(2);
     auto svc2 = std::make_shared<Service>(0x43, "Lightbulb");
 
-    auto on_char = std::make_shared<Characteristic>(0x25, Format::Bool, std::vector{Permission::PairedRead, Permission::PairedWrite, Permission::Notify});
+    auto on_char = std::make_shared<Characteristic>(0x25, Format::Bool, Permissions{Permission::PairedRead, Permission::PairedWrite, Permission::Notify});
     on_char->set_value(true);
     svc2->add_characteristic(on_char);
 

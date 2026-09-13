@@ -44,7 +44,7 @@ void IIDManager::load() {
                 uint16_t iid = 0;
                 auto [ptr, ec] = std::from_chars(value_str.begin(), value_str.end(), iid);
                 if (ec == std::errc() && ptr == value_str.end() && iid != 0) {
-                    iid_map_[key] = iid;
+                    iid_map_.push_back({std::move(key), iid});
                 } else if (system_) {
                     // Corrupted persisted entry: skip rather than throw.
                     HAP_LOG_WARN(system_, "[IIDManager] Skipping malformed IID entry: ", key);
@@ -86,9 +86,9 @@ void IIDManager::save() {
 }
 
 uint16_t IIDManager::get_or_assign(const std::string& key) {
-    auto it = iid_map_.find(key);
+    auto it = find_entry(key);
     if (it != iid_map_.end()) {
-        return it->second;
+        return it->iid;
     }
     
     // Assign new IID
@@ -99,7 +99,7 @@ uint16_t IIDManager::get_or_assign(const std::string& key) {
         next_iid_ = 1;
     }
     
-    iid_map_[key] = iid;
+    iid_map_.push_back(IidEntry{key, iid});
     dirty_ = true;
     
     HAP_LOG(system_, "[IIDManager] Assigned IID=", iid, " for key=", key);
@@ -124,6 +124,15 @@ void IIDManager::update_stored_hash(const std::string& hash) {
     
     std::vector<uint8_t> hash_data(hash.begin(), hash.end());
     storage_->set(kDBHashKey, hash_data);
+}
+
+std::vector<IIDManager::IidEntry>::iterator IIDManager::find_entry(const std::string& key) {
+    // The map holds a few dozen entries at most and is only walked during
+    // startup registration, so a linear scan beats keeping it sorted.
+    for (auto it = iid_map_.begin(); it != iid_map_.end(); ++it) {
+        if (it->key == key) return it;
+    }
+    return iid_map_.end();
 }
 
 void IIDManager::reset() {

@@ -113,7 +113,7 @@ void test_base64_alphabet_decode() {
     // Data-format characteristic with PairedWrite: values arrive base64.
     auto data_char = std::make_shared<hap::core::Characteristic>(
         0x01, hap::core::Format::Data,
-        std::vector{hap::core::Permission::PairedWrite});
+        hap::core::Permissions{hap::core::Permission::PairedWrite});
     svc->add_characteristic(data_char);
     acc->add_service(svc);
     CHECK(db.add_accessory(acc) == hap::core::ValidationResult::Success);

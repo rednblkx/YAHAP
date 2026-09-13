@@ -41,9 +41,9 @@ int main() {
   auto char_on = std::make_shared<hap::core::Characteristic>(
       0x25, // On characteristic type
       hap::core::Format::Bool,
-      std::vector<hap::core::Permission>{hap::core::Permission::PairedRead,
-                                         hap::core::Permission::PairedWrite,
-                                         hap::core::Permission::Notify});
+      hap::core::Permissions{hap::core::Permission::PairedRead,
+                             hap::core::Permission::PairedWrite,
+                             hap::core::Permission::Notify});
 
   svc->add_characteristic(char_on);
   acc->add_service(svc);
