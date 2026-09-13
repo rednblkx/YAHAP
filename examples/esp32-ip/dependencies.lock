@@ -22,11 +22,11 @@ dependencies:
   idf:
     source:
       type: idf
-    version: 5.5.5
+    version: 6.1.0
 direct_dependencies:
 - espressif/libsodium
 - espressif/mdns
 - idf
 manifest_hash: 34b0b29334a2ea1ed30fb925a43dc7d5634eb5fa05e2d44494ba5c3a8ba652d1
 target: esp32
-version: 2.0.0
+version: 3.0.0
