@@ -1,1 +1,8 @@
 CONFIG_BTDM_CTRL_MODEM_SLEEP=n
+
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
+# No Wi-Fi in this example: BT/Wi-Fi software coexistence is dead weight.
+CONFIG_ESP_COEX_SW_COEXIST_ENABLE=n
+# HAP-BLE implements its own PDU fragmentation; prepared writes unused.
+CONFIG_BT_NIMBLE_ATT_MAX_PREP_ENTRIES=8
+CONFIG_BT_NIMBLE_WHITELIST_SIZE=4
