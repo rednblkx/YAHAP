@@ -108,15 +108,15 @@ void test_base64_alphabet_decode() {
     testmock::MockSystem system{true};
 
     hap::core::AttributeDatabase db;
-    auto acc = std::make_shared<hap::core::Accessory>(1);
-    auto svc = std::make_shared<hap::core::Service>(0x4A, "Test");
+    auto acc = std::make_unique<hap::core::Accessory>(1);
+    auto svc = std::make_unique<hap::core::Service>(0x4A, "Test");
     // Data-format characteristic with PairedWrite: values arrive base64.
-    auto data_char = std::make_shared<hap::core::Characteristic>(
+    auto data_char = std::make_unique<hap::core::Characteristic>(
         0x01, hap::core::Format::Data,
         hap::core::Permissions{hap::core::Permission::PairedWrite});
-    svc->add_characteristic(data_char);
-    acc->add_service(svc);
-    CHECK(db.add_accessory(acc) == hap::core::ValidationResult::Success);
+    svc->add_characteristic(std::move(data_char));
+    acc->add_service(std::move(svc));
+    CHECK(db.add_accessory(std::move(acc)) == hap::core::ValidationResult::Success);
 
     hap::transport::AccessoryEndpoints endpoints(&db);
 
@@ -138,8 +138,9 @@ void test_base64_alphabet_decode() {
     CHECK(resp.status == Status::NoContent);
 
     // The stored value must be the exact decoded bytes, including 0x2F ('/')
-    // and 0xFB/0xFF (from '+/8' style runs).
-    auto stored = data_char->get_value();
+    // and 0xFB/0xFF (from '+/8' style runs). Ownership moved into the service,
+    // so fetch the characteristic through it.
+    auto stored = db.accessories()[0]->services()[0]->characteristics()[0]->get_value();
     CHECK(std::holds_alternative<hap::core::Value>(stored));
     auto& bytes = std::get<std::vector<uint8_t>>(std::get<hap::core::Value>(stored));
     const std::vector<uint8_t> expected = {0x01, 0x01, 0x02, 0x06, 0x2F, 0xFB, 0xFF, 0x0A};

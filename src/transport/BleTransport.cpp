@@ -616,11 +616,11 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
 
     HAP_LOG_INFO(config_.system, "[BleTransport] Processing Opcode ", (int)opcode, " TID=", tid);
     
-    auto find_service = [&](uint16_t target_iid) -> std::shared_ptr<core::Service> {
+    auto find_service = [&](uint16_t target_iid) -> core::Service* {
         return config_.database ? config_.database->find_service_by_iid(target_iid) : nullptr;
     };
 
-    auto find_char_in_db = [&](uint16_t target_iid) -> std::shared_ptr<core::Characteristic> {
+    auto find_char_in_db = [&](uint16_t target_iid) -> core::Characteristic* {
         return config_.database ? config_.database->find_characteristic_by_iid(target_iid) : nullptr;
     };
 

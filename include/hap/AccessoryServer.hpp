@@ -78,7 +78,7 @@ public:
 
     /// @return false if validation failed (duplicate AID, limits exceeded);
     /// the accessory was NOT added in that case.
-    bool add_accessory(std::shared_ptr<core::Accessory> accessory);
+    bool add_accessory(std::unique_ptr<core::Accessory> accessory);
 
     /**
      * @brief Broadcast an event notification to all subscribed controllers.

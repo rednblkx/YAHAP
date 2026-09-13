@@ -41,7 +41,8 @@ A modern C++20 implementation of the HomeKit Accessory Protocol (HAP) with a foc
 | Component | Description |
 |-----------|-------------|
 | `AccessoryServer` | Main server orchestrating HAP protocol, manages accessories and connections |
-| `AttributeDatabase` | HAP object model (Accessories, Services, Characteristics) with JSON serialization |
+| `AttributeDatabase` | HAP object model (Accessories, Services, Characteristics) with JSON serialization. Unique ownership (`std::unique_ptr`) throughout; lookups return raw non-owning pointers |
+| `ServiceBuilder` | Generic table-driven service builder; the full HAP characteristic catalog is a compact ROM descriptor table (`CharacteristicTypes.hpp`) |
 | `PairSetup` | SRP-6a based iOS pairing handshake (M1-M6 exchange) |
 | `PairVerify` | Ed25519/X25519 session establishment for paired devices |
 | `SecureSession` | ChaCha20-Poly1305 encrypted frame handling |

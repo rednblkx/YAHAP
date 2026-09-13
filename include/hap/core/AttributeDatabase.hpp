@@ -55,10 +55,10 @@ public:
      * @param accessory The accessory to validate
      * @return ValidationResult indicating success or specific failure
      */
-    ValidationResult validate_accessory(const std::shared_ptr<Accessory>& accessory) const {
+    ValidationResult validate_accessory(const Accessory& accessory) const {
         // Check for duplicate AID (always applies)
         for (const auto& existing : accessories_) {
-            if (existing->aid() == accessory->aid()) {
+            if (existing->aid() == accessory.aid()) {
                 return ValidationResult::DuplicateAccessoryId;
             }
         }
@@ -71,12 +71,12 @@ public:
         }
         
         // Check service limit - universal (HAP Spec 6.11 test 16)
-        if (accessory->services().size() > HAPValidation::kMaxServicesPerAccessory) {
+        if (accessory.services().size() > HAPValidation::kMaxServicesPerAccessory) {
             return ValidationResult::TooManyServices;
         }
         
         // Check characteristic limit - universal (HAP Spec 6.11 test 15)
-        for (const auto& service : accessory->services()) {
+        for (const auto& service : accessory.services()) {
             if (service->characteristics().size() > HAPValidation::kMaxCharacteristicsPerService) {
                 return ValidationResult::TooManyCharacteristics;
             }
@@ -90,29 +90,29 @@ public:
      * @param accessory The accessory to add
      * @return ValidationResult indicating success or specific failure
      */
-    ValidationResult add_accessory(std::shared_ptr<Accessory> accessory) {
-        ValidationResult result = validate_accessory(accessory);
+    ValidationResult add_accessory(std::unique_ptr<Accessory> accessory) {
+        ValidationResult result = validate_accessory(*accessory);
         if (result != ValidationResult::Success) {
             return result;
         }
         
-        assign_iids(accessory);
+        assign_iids(*accessory);
         accessories_.push_back(std::move(accessory));
         return ValidationResult::Success;
     }
 
 
-    const std::vector<std::shared_ptr<Accessory>>& accessories() const {
+    const std::vector<std::unique_ptr<Accessory>>& accessories() const {
         return accessories_;
     }
 
-    std::shared_ptr<Characteristic> find_characteristic(uint64_t aid, uint64_t iid) {
+    Characteristic* find_characteristic(uint64_t aid, uint64_t iid) {
         for (const auto& acc : accessories_) {
             if (acc->aid() == aid) {
                 for (const auto& svc : acc->services()) {
                     for (const auto& char_ptr : svc->characteristics()) {
                         if (char_ptr->iid() == iid) {
-                            return char_ptr;
+                            return char_ptr.get();
                         }
                     }
                 }
@@ -125,12 +125,12 @@ public:
      * @brief Find a characteristic anywhere in the database by IID.
      * IIDs are unique across a bridge, so the first match is authoritative.
      */
-    std::shared_ptr<Characteristic> find_characteristic_by_iid(uint16_t iid) {
+    Characteristic* find_characteristic_by_iid(uint16_t iid) {
         for (const auto& acc : accessories_) {
             for (const auto& svc : acc->services()) {
                 for (const auto& char_ptr : svc->characteristics()) {
                     if (char_ptr->iid() == iid) {
-                        return char_ptr;
+                        return char_ptr.get();
                     }
                 }
             }
@@ -141,11 +141,11 @@ public:
     /**
      * @brief Find a service by IID (services are also uniquely numbered).
      */
-    std::shared_ptr<Service> find_service_by_iid(uint16_t iid) {
+    Service* find_service_by_iid(uint16_t iid) {
         for (const auto& acc : accessories_) {
             for (const auto& svc : acc->services()) {
                 if (svc->iid() == iid) {
-                    return svc;
+                    return svc.get();
                 }
             }
         }
@@ -156,8 +156,8 @@ public:
      * @brief Locate a characteristic plus its containing service and accessory.
      */
     struct CharacteristicLocation {
-        std::shared_ptr<Characteristic> characteristic;
-        std::shared_ptr<Service> service;
+        Characteristic* characteristic = nullptr;
+        Service* service = nullptr;
         uint64_t accessory_id = 0;
     };
 
@@ -166,7 +166,7 @@ public:
             for (const auto& svc : acc->services()) {
                 for (const auto& char_ptr : svc->characteristics()) {
                     if (char_ptr->iid() == iid) {
-                        return {char_ptr, svc, acc->aid()};
+                        return {char_ptr.get(), svc.get(), acc->aid()};
                     }
                 }
             }
@@ -180,8 +180,8 @@ private:
     /**
      * @brief Assign IIDs to all services and characteristics in an accessory.
      */
-    void assign_iids(const std::shared_ptr<Accessory>& accessory) {
-        uint64_t aid = accessory->aid();
+    void assign_iids(Accessory& accessory) {
+        uint64_t aid = accessory.aid();
 
         // Stable keys embed the attribute type as 4 uppercase hex digits.
         auto append_hex4 = [](std::string& out, uint16_t v) {
@@ -197,7 +197,7 @@ private:
             out.append(digits, ptr);
         };
 
-        for (const auto& service : accessory->services()) {
+        for (const auto& service : accessory.services()) {
             uint16_t svc_iid;
 
             if (iid_manager_) {
@@ -238,7 +238,7 @@ private:
         }
     }
 
-    std::vector<std::shared_ptr<Accessory>> accessories_;
+    std::vector<std::unique_ptr<Accessory>> accessories_;
     IIDManager* iid_manager_ = nullptr;
     uint16_t next_iid_ = 1;  // Fallback when no IIDManager
 };

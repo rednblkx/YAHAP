@@ -1,1028 +1,187 @@
-/**
- * @file CharacteristicTypes.cpp
- * @brief Implementation of HAP Characteristic factory functions
- * 
- * Factory functions return pre-configured characteristics with proper
- * type, format, permissions, and metadata.
- */
-
 #include "hap/types/CharacteristicTypes.hpp"
-#include "hap/core/TLV8.hpp"
+
+// The catalog table uses designated initializers with intentionally-missing
+// optional fields; -Wextra flags every such row otherwise.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 
 namespace hap::characteristic {
 
-using namespace hap::core;
-
-//==============================================================================
-// Helper macros for common permission patterns
-//==============================================================================
-#define PERM_PR     Permissions{Permission::PairedRead}
-#define PERM_PW     Permissions{Permission::PairedWrite}
-#define PERM_PR_NT  Permissions{Permission::PairedRead, Permission::Notify}
-#define PERM_PR_PW  Permissions{Permission::PairedRead, Permission::PairedWrite}
-#define PERM_PR_PW_NT Permissions{Permission::PairedRead, Permission::PairedWrite, Permission::Notify}
-#define PERM_PR_PW_WR Permissions{Permission::PairedRead, Permission::PairedWrite, Permission::WriteResponse}
-
-//==============================================================================
-// Accessory Information Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> AccessoryFlags() {
-    auto c = std::make_shared<Characteristic>(kType_AccessoryFlags, Format::UInt32, PERM_PR_NT);
-    c->set_value(static_cast<uint32_t>(0));
-    return c;
-}
-
-std::shared_ptr<Characteristic> FirmwareRevision() {
-    auto c = std::make_shared<Characteristic>(kType_FirmwareRevision, Format::String, PERM_PR);
-    c->set_value(std::string("1.0.0"));
-    return c;
-}
-
-std::shared_ptr<Characteristic> HardwareRevision() {
-    auto c = std::make_shared<Characteristic>(kType_HardwareRevision, Format::String, PERM_PR);
-    c->set_value(std::string("1.0.0"));
-    return c;
-}
-
-std::shared_ptr<Characteristic> Identify() {
-    auto c = std::make_shared<Characteristic>(kType_Identify, Format::Bool, PERM_PR_PW);
-    c->set_value(false);
-    return c;
-}
-
-std::shared_ptr<Characteristic> Manufacturer() {
-    auto c = std::make_shared<Characteristic>(kType_Manufacturer, Format::String, PERM_PR);
-    c->set_max_len(64);
-    c->set_value(std::string(""));
-    return c;
-}
-
-std::shared_ptr<Characteristic> Model() {
-    auto c = std::make_shared<Characteristic>(kType_Model, Format::String, PERM_PR);
-    c->set_max_len(64);
-    c->set_value(std::string(""));
-    return c;
-}
-
-std::shared_ptr<Characteristic> Name() {
-    auto c = std::make_shared<Characteristic>(kType_Name, Format::String, PERM_PR);
-    c->set_max_len(64);
-    c->set_value(std::string(""));
-    return c;
-}
-
-std::shared_ptr<Characteristic> SerialNumber() {
-    auto c = std::make_shared<Characteristic>(kType_SerialNumber, Format::String, PERM_PR);
-    c->set_max_len(64);
-    c->set_value(std::string(""));
-    return c;
-}
-
-std::shared_ptr<Characteristic> HardwareFinish() {
-    auto c = std::make_shared<Characteristic>(kType_HardwareFinish, Format::TLV8, PERM_PR);
-    c->set_value(TLV8::encode({TLV(0x01,{0xce,0xd5,0xda,0x00})}));
-    return c;
-}
-
-//==============================================================================
-// Lightbulb Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> On() {
-    auto c = std::make_shared<Characteristic>(kType_On, Format::Bool, PERM_PR_PW_NT);
-    c->set_value(false);
-    return c;
-}
-
-std::shared_ptr<Characteristic> Brightness() {
-    auto c = std::make_shared<Characteristic>(kType_Brightness, Format::Int, PERM_PR_PW_NT);
-    c->set_unit("percentage");
-    c->set_min_value(0);
-    c->set_max_value(100);
-    c->set_min_step(1);
-    c->set_value(static_cast<int32_t>(100));
-    return c;
-}
-
-std::shared_ptr<Characteristic> Hue() {
-    auto c = std::make_shared<Characteristic>(kType_Hue, Format::Float, PERM_PR_PW_NT);
-    c->set_unit("arcdegrees");
-    c->set_min_value(0);
-    c->set_max_value(360);
-    c->set_min_step(1);
-    c->set_value(0.0f);
-    return c;
-}
-
-std::shared_ptr<Characteristic> Saturation() {
-    auto c = std::make_shared<Characteristic>(kType_Saturation, Format::Float, PERM_PR_PW_NT);
-    c->set_unit("percentage");
-    c->set_min_value(0);
-    c->set_max_value(100);
-    c->set_min_step(1);
-    c->set_value(0.0f);
-    return c;
-}
-
-std::shared_ptr<Characteristic> ColorTemperature() {
-    auto c = std::make_shared<Characteristic>(kType_ColorTemperature, Format::UInt32, PERM_PR_PW_NT);
-    c->set_min_value(140);    // ~7142K (cool white)
-    c->set_max_value(500);    // 2000K (warm white)
-    c->set_min_step(1);
-    c->set_value(static_cast<uint32_t>(200));
-    return c;
-}
-
-//==============================================================================
-// Thermostat / Temperature Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> CurrentTemperature() {
-    auto c = std::make_shared<Characteristic>(kType_CurrentTemperature, Format::Float, PERM_PR_NT);
-    c->set_unit("celsius");
-    c->set_min_value(0);
-    c->set_max_value(100);
-    c->set_min_step(0.1);
-    c->set_value(20.0f);
-    return c;
-}
-
-std::shared_ptr<Characteristic> TargetTemperature() {
-    auto c = std::make_shared<Characteristic>(kType_TargetTemperature, Format::Float, PERM_PR_PW_NT);
-    c->set_unit("celsius");
-    c->set_min_value(10);
-    c->set_max_value(38);
-    c->set_min_step(0.1);
-    c->set_value(20.0f);
-    return c;
-}
-
-std::shared_ptr<Characteristic> TemperatureDisplayUnitsChar() {
-    auto c = std::make_shared<Characteristic>(kType_TemperatureDisplayUnits, Format::UInt8, PERM_PR_PW_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0)); // Celsius
-    return c;
-}
-
-std::shared_ptr<Characteristic> CurrentHeatingCoolingStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_CurrentHeatingCoolingState, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(2);
-    c->set_value(static_cast<uint8_t>(0)); // Off
-    return c;
-}
-
-std::shared_ptr<Characteristic> TargetHeatingCoolingStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_TargetHeatingCoolingState, Format::UInt8, PERM_PR_PW_NT);
-    c->set_min_value(0);
-    c->set_max_value(3);
-    c->set_value(static_cast<uint8_t>(0)); // Off
-    return c;
-}
-
-std::shared_ptr<Characteristic> CoolingThresholdTemperature() {
-    auto c = std::make_shared<Characteristic>(kType_CoolingThresholdTemperature, Format::Float, PERM_PR_PW_NT);
-    c->set_unit("celsius");
-    c->set_min_value(10);
-    c->set_max_value(35);
-    c->set_min_step(0.1);
-    c->set_value(26.0f);
-    return c;
-}
-
-std::shared_ptr<Characteristic> HeatingThresholdTemperature() {
-    auto c = std::make_shared<Characteristic>(kType_HeatingThresholdTemperature, Format::Float, PERM_PR_PW_NT);
-    c->set_unit("celsius");
-    c->set_min_value(0);
-    c->set_max_value(25);
-    c->set_min_step(0.1);
-    c->set_value(18.0f);
-    return c;
-}
-
-//==============================================================================
-// Humidity Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> CurrentRelativeHumidity() {
-    auto c = std::make_shared<Characteristic>(kType_CurrentRelativeHumidity, Format::Float, PERM_PR_NT);
-    c->set_unit("percentage");
-    c->set_min_value(0);
-    c->set_max_value(100);
-    c->set_min_step(1);
-    c->set_value(50.0f);
-    return c;
-}
-
-std::shared_ptr<Characteristic> TargetRelativeHumidity() {
-    auto c = std::make_shared<Characteristic>(kType_TargetRelativeHumidity, Format::Float, PERM_PR_PW_NT);
-    c->set_unit("percentage");
-    c->set_min_value(0);
-    c->set_max_value(100);
-    c->set_min_step(1);
-    c->set_value(50.0f);
-    return c;
-}
-
-//==============================================================================
-// Door / Garage Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> CurrentDoorStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_CurrentDoorState, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(4);
-    c->set_value(static_cast<uint8_t>(1)); // Closed
-    return c;
-}
-
-std::shared_ptr<Characteristic> TargetDoorStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_TargetDoorState, Format::UInt8, PERM_PR_PW_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(1)); // Closed
-    return c;
-}
-
-std::shared_ptr<Characteristic> ObstructionDetected() {
-    auto c = std::make_shared<Characteristic>(kType_ObstructionDetected, Format::Bool, PERM_PR_NT);
-    c->set_value(false);
-    return c;
-}
-
-//==============================================================================
-// Lock Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> LockCurrentStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_LockCurrentState, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(3);
-    c->set_value(static_cast<uint8_t>(1)); // Secured
-    return c;
-}
-
-std::shared_ptr<Characteristic> LockTargetStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_LockTargetState, Format::UInt8, PERM_PR_PW_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(1)); // Secured
-    return c;
-}
-
-//==============================================================================
-// Fan Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> ActiveChar() {
-    auto c = std::make_shared<Characteristic>(kType_Active, Format::UInt8, PERM_PR_PW_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0)); // Inactive
-    return c;
-}
-
-std::shared_ptr<Characteristic> CurrentFanStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_CurrentFanState, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(2);
-    c->set_value(static_cast<uint8_t>(0)); // Inactive
-    return c;
-}
-
-std::shared_ptr<Characteristic> TargetFanStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_TargetFanState, Format::UInt8, PERM_PR_PW_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0)); // Manual
-    return c;
-}
-
-std::shared_ptr<Characteristic> RotationDirectionChar() {
-    auto c = std::make_shared<Characteristic>(kType_RotationDirection, Format::Int, PERM_PR_PW_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<int32_t>(0)); // Clockwise
-    return c;
-}
-
-std::shared_ptr<Characteristic> RotationSpeed() {
-    auto c = std::make_shared<Characteristic>(kType_RotationSpeed, Format::Float, PERM_PR_PW_NT);
-    c->set_unit("percentage");
-    c->set_min_value(0);
-    c->set_max_value(100);
-    c->set_min_step(1);
-    c->set_value(0.0f);
-    return c;
-}
-
-std::shared_ptr<Characteristic> SwingModeChar() {
-    auto c = std::make_shared<Characteristic>(kType_SwingMode, Format::UInt8, PERM_PR_PW_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0)); // Disabled
-    return c;
-}
-
-//==============================================================================
-// Window / Covering Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> CurrentPosition() {
-    auto c = std::make_shared<Characteristic>(kType_CurrentPosition, Format::UInt8, PERM_PR_NT);
-    c->set_unit("percentage");
-    c->set_min_value(0);
-    c->set_max_value(100);
-    c->set_min_step(1);
-    c->set_value(static_cast<uint8_t>(0));
-    return c;
-}
-
-std::shared_ptr<Characteristic> TargetPosition() {
-    auto c = std::make_shared<Characteristic>(kType_TargetPosition, Format::UInt8, PERM_PR_PW_NT);
-    c->set_unit("percentage");
-    c->set_min_value(0);
-    c->set_max_value(100);
-    c->set_min_step(1);
-    c->set_value(static_cast<uint8_t>(0));
-    return c;
-}
-
-std::shared_ptr<Characteristic> PositionStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_PositionState, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(2);
-    c->set_value(static_cast<uint8_t>(2)); // Stopped
-    return c;
-}
-
-std::shared_ptr<Characteristic> HoldPositionChar() {
-    auto c = std::make_shared<Characteristic>(kType_HoldPosition, Format::Bool, PERM_PW);
-    c->set_value(false);
-    return c;
-}
-
-//==============================================================================
-// Sensor Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> MotionDetected() {
-    auto c = std::make_shared<Characteristic>(kType_MotionDetected, Format::Bool, PERM_PR_NT);
-    c->set_value(false);
-    return c;
-}
-
-std::shared_ptr<Characteristic> OccupancyDetected() {
-    auto c = std::make_shared<Characteristic>(kType_OccupancyDetected, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0));
-    return c;
-}
-
-std::shared_ptr<Characteristic> ContactSensorStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_ContactSensorState, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0));
-    return c;
-}
-
-std::shared_ptr<Characteristic> LeakDetected() {
-    auto c = std::make_shared<Characteristic>(kType_LeakDetected, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0));
-    return c;
-}
-
-std::shared_ptr<Characteristic> SmokeDetected() {
-    auto c = std::make_shared<Characteristic>(kType_SmokeDetected, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0));
-    return c;
-}
-
-std::shared_ptr<Characteristic> CarbonMonoxideDetectedChar() {
-    auto c = std::make_shared<Characteristic>(kType_CarbonMonoxideDetected, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0));
-    return c;
-}
-
-std::shared_ptr<Characteristic> CarbonMonoxideLevel() {
-    auto c = std::make_shared<Characteristic>(kType_CarbonMonoxideLevel, Format::Float, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(100);
-    c->set_value(0.0f);
-    return c;
-}
-
-std::shared_ptr<Characteristic> CarbonDioxideDetectedChar() {
-    auto c = std::make_shared<Characteristic>(kType_CarbonDioxideDetected, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0));
-    return c;
-}
-
-std::shared_ptr<Characteristic> CarbonDioxideLevel() {
-    auto c = std::make_shared<Characteristic>(kType_CarbonDioxideLevel, Format::Float, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(100000);
-    c->set_value(0.0f);
-    return c;
-}
-
-std::shared_ptr<Characteristic> CurrentAmbientLightLevel() {
-    auto c = std::make_shared<Characteristic>(kType_CurrentAmbientLightLevel, Format::Float, PERM_PR_NT);
-    c->set_unit("lux");
-    c->set_min_value(0.0001);
-    c->set_max_value(100000);
-    c->set_value(1.0f);
-    return c;
-}
-
-//==============================================================================
-// Air Quality Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> AirQualityChar() {
-    auto c = std::make_shared<Characteristic>(kType_AirQuality, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(5);
-    c->set_value(static_cast<uint8_t>(0)); // Unknown
-    return c;
-}
-
-std::shared_ptr<Characteristic> PM2_5Density() {
-    auto c = std::make_shared<Characteristic>(kType_PM2_5Density, Format::Float, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1000);
-    c->set_value(0.0f);
-    return c;
-}
-
-std::shared_ptr<Characteristic> PM10Density() {
-    auto c = std::make_shared<Characteristic>(kType_PM10Density, Format::Float, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1000);
-    c->set_value(0.0f);
-    return c;
-}
-
-std::shared_ptr<Characteristic> VOCDensity() {
-    auto c = std::make_shared<Characteristic>(kType_VOCDensity, Format::Float, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1000);
-    c->set_value(0.0f);
-    return c;
-}
-
-//==============================================================================
-// Security System Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> SecuritySystemCurrentStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_SecuritySystemCurrentState, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(4);
-    c->set_value(static_cast<uint8_t>(3)); // Disarmed
-    return c;
-}
-
-std::shared_ptr<Characteristic> SecuritySystemTargetStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_SecuritySystemTargetState, Format::UInt8, PERM_PR_PW_NT);
-    c->set_min_value(0);
-    c->set_max_value(3);
-    c->set_value(static_cast<uint8_t>(3)); // Disarm
-    return c;
-}
-
-//==============================================================================
-// Battery Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> BatteryLevel() {
-    auto c = std::make_shared<Characteristic>(kType_BatteryLevel, Format::UInt8, PERM_PR_NT);
-    c->set_unit("percentage");
-    c->set_min_value(0);
-    c->set_max_value(100);
-    c->set_value(static_cast<uint8_t>(100));
-    return c;
-}
-
-std::shared_ptr<Characteristic> ChargingStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_ChargingState, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(2);
-    c->set_value(static_cast<uint8_t>(0)); // Not Charging
-    return c;
-}
-
-std::shared_ptr<Characteristic> StatusLowBatteryChar() {
-    auto c = std::make_shared<Characteristic>(kType_StatusLowBattery, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0)); // Normal
-    return c;
-}
-
-//==============================================================================
-// Status Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> StatusActive() {
-    auto c = std::make_shared<Characteristic>(kType_StatusActive, Format::Bool, PERM_PR_NT);
-    c->set_value(true);
-    return c;
-}
-
-std::shared_ptr<Characteristic> StatusFault() {
-    auto c = std::make_shared<Characteristic>(kType_StatusFault, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0)); // No Fault
-    return c;
-}
-
-std::shared_ptr<Characteristic> StatusTampered() {
-    auto c = std::make_shared<Characteristic>(kType_StatusTampered, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0)); // Not Tampered
-    return c;
-}
-
-//==============================================================================
-// Outlet Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> OutletInUse() {
-    auto c = std::make_shared<Characteristic>(kType_OutletInUse, Format::Bool, PERM_PR_NT);
-    c->set_value(false);
-    return c;
-}
-
-//==============================================================================
-// Audio Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> Volume() {
-    auto c = std::make_shared<Characteristic>(kType_Volume, Format::UInt8, PERM_PR_PW_NT);
-    c->set_unit("percentage");
-    c->set_min_value(0);
-    c->set_max_value(100);
-    c->set_min_step(1);
-    c->set_value(static_cast<uint8_t>(50));
-    return c;
-}
-
-std::shared_ptr<Characteristic> Mute() {
-    auto c = std::make_shared<Characteristic>(kType_Mute, Format::Bool, PERM_PR_PW_NT);
-    c->set_value(false);
-    return c;
-}
-
-//==============================================================================
-// Switch Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> ProgrammableSwitchEventChar() {
-    // Note: This characteristic is event-only (null value allowed)
-    auto c = std::make_shared<Characteristic>(kType_ProgrammableSwitchEvent, Format::UInt8, 
-        Permissions{Permission::PairedRead, Permission::Notify});
-    c->set_min_value(0);
-    c->set_max_value(2);
-    return c;
-}
-
-std::shared_ptr<Characteristic> ServiceLabelIndex() {
-    auto c = std::make_shared<Characteristic>(kType_ServiceLabelIndex, Format::UInt8, PERM_PR);
-    c->set_min_value(1);
-    c->set_max_value(255);
-    c->set_value(static_cast<uint8_t>(1));
-    return c;
-}
-
-std::shared_ptr<Characteristic> ServiceLabelNamespaceChar() {
-    auto c = std::make_shared<Characteristic>(kType_ServiceLabelNamespace, Format::UInt8, PERM_PR);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(1)); // Arabic numerals
-    return c;
-}
-
-//==============================================================================
-// Valve Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> InUseChar() {
-    auto c = std::make_shared<Characteristic>(kType_InUse, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0)); // Not in use
-    return c;
-}
-
-std::shared_ptr<Characteristic> IsConfigured() {
-    auto c = std::make_shared<Characteristic>(kType_IsConfigured, Format::UInt8, PERM_PR_PW_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0)); // Not configured
-    return c;
-}
-
-std::shared_ptr<Characteristic> RemainingDuration() {
-    auto c = std::make_shared<Characteristic>(kType_RemainingDuration, Format::UInt32, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(3600);
-    c->set_value(static_cast<uint32_t>(0));
-    return c;
-}
-
-std::shared_ptr<Characteristic> SetDuration() {
-    auto c = std::make_shared<Characteristic>(kType_SetDuration, Format::UInt32, PERM_PR_PW_NT);
-    c->set_min_value(0);
-    c->set_max_value(3600);
-    c->set_value(static_cast<uint32_t>(0));
-    return c;
-}
-
-std::shared_ptr<Characteristic> ValveTypeChar() {
-    auto c = std::make_shared<Characteristic>(kType_ValveType, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(3);
-    c->set_value(static_cast<uint8_t>(0)); // Generic
-    return c;
-}
-
-std::shared_ptr<Characteristic> ProgramMode() {
-    auto c = std::make_shared<Characteristic>(kType_ProgramMode, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(2);
-    c->set_value(static_cast<uint8_t>(0)); // No program scheduled
-    return c;
-}
-
-//==============================================================================
-// Air Purifier Characteristics (9.35)
-//==============================================================================
-
-std::shared_ptr<Characteristic> CurrentAirPurifierStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_CurrentAirPurifierState, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(2);
-    c->set_value(static_cast<uint8_t>(0)); // Inactive
-    return c;
-}
-
-std::shared_ptr<Characteristic> TargetAirPurifierStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_TargetAirPurifierState, Format::UInt8, PERM_PR_PW_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0)); // Manual
-    return c;
-}
-
-//==============================================================================
-// Heater Cooler Characteristics (9.36)
-//==============================================================================
-
-std::shared_ptr<Characteristic> CurrentHeaterCoolerStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_CurrentHeaterCoolerState, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(3);
-    c->set_value(static_cast<uint8_t>(0)); // Inactive
-    return c;
-}
-
-std::shared_ptr<Characteristic> TargetHeaterCoolerStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_TargetHeaterCoolerState, Format::UInt8, PERM_PR_PW_NT);
-    c->set_min_value(0);
-    c->set_max_value(2);
-    c->set_value(static_cast<uint8_t>(0)); // Auto
-    return c;
-}
-
-//==============================================================================
-// Humidifier Dehumidifier Characteristics (9.37)
-//==============================================================================
-
-std::shared_ptr<Characteristic> CurrentHumidifierDehumidifierStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_CurrentHumidifierDehumidifierState, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(3);
-    c->set_value(static_cast<uint8_t>(0)); // Inactive
-    return c;
-}
-
-std::shared_ptr<Characteristic> TargetHumidifierDehumidifierStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_TargetHumidifierDehumidifierState, Format::UInt8, PERM_PR_PW_NT);
-    c->set_min_value(0);
-    c->set_max_value(2);
-    c->set_value(static_cast<uint8_t>(0)); // Humidifier or Dehumidifier
-    return c;
-}
-
-std::shared_ptr<Characteristic> WaterLevel() {
-    auto c = std::make_shared<Characteristic>(kType_WaterLevel, Format::Float, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(100);
-    c->set_value(0.0f);
-    return c;
-}
-
-std::shared_ptr<Characteristic> RelativeHumidityDehumidifierThreshold() {
-    auto c = std::make_shared<Characteristic>(kType_RelativeHumidityDehumidifierThreshold, Format::Float, PERM_PR_PW_NT);
-    c->set_unit("percentage");
-    c->set_min_value(0);
-    c->set_max_value(100);
-    c->set_min_step(1);
-    c->set_value(50.0f);
-    return c;
-}
-
-std::shared_ptr<Characteristic> RelativeHumidityHumidifierThreshold() {
-    auto c = std::make_shared<Characteristic>(kType_RelativeHumidityHumidifierThreshold, Format::Float, PERM_PR_PW_NT);
-    c->set_unit("percentage");
-    c->set_min_value(0);
-    c->set_max_value(100);
-    c->set_min_step(1);
-    c->set_value(50.0f);
-    return c;
-}
-
-//==============================================================================
-// Filter Maintenance Characteristics (9.34)
-//==============================================================================
-
-std::shared_ptr<Characteristic> FilterLifeLevel() {
-    auto c = std::make_shared<Characteristic>(kType_FilterLifeLevel, Format::Float, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(100);
-    c->set_value(100.0f);
-    return c;
-}
-
-std::shared_ptr<Characteristic> FilterChangeIndication() {
-    auto c = std::make_shared<Characteristic>(kType_FilterChangeIndication, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0)); // Filter OK
-    return c;
-}
-
-std::shared_ptr<Characteristic> ResetFilterIndication() {
-    auto c = std::make_shared<Characteristic>(kType_ResetFilterIndication, Format::UInt8, PERM_PW);
-    c->set_min_value(1);
-    c->set_max_value(1);
-    return c;
-}
-
-//==============================================================================
-// Slat Characteristics (9.33)
-//==============================================================================
-
-std::shared_ptr<Characteristic> CurrentSlatStateChar() {
-    auto c = std::make_shared<Characteristic>(kType_CurrentSlatState, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(2);
-    c->set_value(static_cast<uint8_t>(0)); // Fixed
-    return c;
-}
-
-std::shared_ptr<Characteristic> SlatTypeChar() {
-    auto c = std::make_shared<Characteristic>(kType_SlatType, Format::UInt8, PERM_PR);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0)); // Horizontal
-    return c;
-}
-
-std::shared_ptr<Characteristic> CurrentTiltAngle() {
-    auto c = std::make_shared<Characteristic>(kType_CurrentTiltAngle, Format::Int, PERM_PR_NT);
-    c->set_unit("arcdegrees");
-    c->set_min_value(-90);
-    c->set_max_value(90);
-    c->set_min_step(1);
-    c->set_value(static_cast<int32_t>(0));
-    return c;
-}
-
-std::shared_ptr<Characteristic> TargetTiltAngle() {
-    auto c = std::make_shared<Characteristic>(kType_TargetTiltAngle, Format::Int, PERM_PR_PW_NT);
-    c->set_unit("arcdegrees");
-    c->set_min_value(-90);
-    c->set_max_value(90);
-    c->set_min_step(1);
-    c->set_value(static_cast<int32_t>(0));
-    return c;
-}
-
-//==============================================================================
-// Window Tilt Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> CurrentHorizontalTiltAngle() {
-    auto c = std::make_shared<Characteristic>(kType_CurrentHorizontalTiltAngle, Format::Int, PERM_PR_NT);
-    c->set_unit("arcdegrees");
-    c->set_min_value(-90);
-    c->set_max_value(90);
-    c->set_min_step(1);
-    c->set_value(static_cast<int32_t>(0));
-    return c;
-}
-
-std::shared_ptr<Characteristic> TargetHorizontalTiltAngle() {
-    auto c = std::make_shared<Characteristic>(kType_TargetHorizontalTiltAngle, Format::Int, PERM_PR_PW_NT);
-    c->set_unit("arcdegrees");
-    c->set_min_value(-90);
-    c->set_max_value(90);
-    c->set_min_step(1);
-    c->set_value(static_cast<int32_t>(0));
-    return c;
-}
-
-std::shared_ptr<Characteristic> CurrentVerticalTiltAngle() {
-    auto c = std::make_shared<Characteristic>(kType_CurrentVerticalTiltAngle, Format::Int, PERM_PR_NT);
-    c->set_unit("arcdegrees");
-    c->set_min_value(-90);
-    c->set_max_value(90);
-    c->set_min_step(1);
-    c->set_value(static_cast<int32_t>(0));
-    return c;
-}
-
-std::shared_ptr<Characteristic> TargetVerticalTiltAngle() {
-    auto c = std::make_shared<Characteristic>(kType_TargetVerticalTiltAngle, Format::Int, PERM_PR_PW_NT);
-    c->set_unit("arcdegrees");
-    c->set_min_value(-90);
-    c->set_max_value(90);
-    c->set_min_step(1);
-    c->set_value(static_cast<int32_t>(0));
-    return c;
-}
-
-//==============================================================================
-// Air Quality Extended Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> OzoneDensity() {
-    auto c = std::make_shared<Characteristic>(kType_OzoneDensity, Format::Float, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1000);
-    c->set_value(0.0f);
-    return c;
-}
-
-std::shared_ptr<Characteristic> NitrogenDioxideDensity() {
-    auto c = std::make_shared<Characteristic>(kType_NitrogenDioxideDensity, Format::Float, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1000);
-    c->set_value(0.0f);
-    return c;
-}
-
-std::shared_ptr<Characteristic> SulphurDioxideDensity() {
-    auto c = std::make_shared<Characteristic>(kType_SulphurDioxideDensity, Format::Float, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1000);
-    c->set_value(0.0f);
-    return c;
-}
-
-std::shared_ptr<Characteristic> AirParticulateDensity() {
-    auto c = std::make_shared<Characteristic>(kType_AirParticulateDensity, Format::Float, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1000);
-    c->set_value(0.0f);
-    return c;
-}
-
-std::shared_ptr<Characteristic> AirParticulateSize() {
-    auto c = std::make_shared<Characteristic>(kType_AirParticulateSize, Format::UInt8, PERM_PR);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0)); // 2.5 um
-    return c;
-}
-
-std::shared_ptr<Characteristic> CarbonMonoxidePeakLevel() {
-    auto c = std::make_shared<Characteristic>(kType_CarbonMonoxidePeakLevel, Format::Float, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(100);
-    c->set_value(0.0f);
-    return c;
-}
-
-std::shared_ptr<Characteristic> CarbonDioxidePeakLevel() {
-    auto c = std::make_shared<Characteristic>(kType_CarbonDioxidePeakLevel, Format::Float, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(100000);
-    c->set_value(0.0f);
-    return c;
-}
-
-//============================================================================== 
-// NFC Access Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> NFCAccessControlPoint() {
-    auto c = std::make_shared<Characteristic>(kType_NFCAccessControlPoint, Format::TLV8, PERM_PR_PW_WR);
-    c->set_value(TLV8::encode({}));
-    return c;
-}
-
-std::shared_ptr<Characteristic> NFCAccessSupportedConfiguration() {
-    auto c = std::make_shared<Characteristic>(kType_NFCAccessSupportedConfiguration, Format::TLV8, PERM_PR);
-    c->set_value(TLV8::encode({TLV(0x01,0x10), TLV(0x02,0x10)}));
-    return c;
-}
-
-std::shared_ptr<Characteristic> ConfigurationState() {
-    auto c = std::make_shared<Characteristic>(kType_ConfigurationState, Format::UInt16, PERM_PR_NT);
-    c->set_value(static_cast<uint8_t>(0));
-    return c;
-}
-
-//==============================================================================
-// Lock Management Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> LockControlPoint() {
-    auto c = std::make_shared<Characteristic>(kType_LockControlPoint, Format::TLV8, PERM_PW);
-    return c;
-}
-
-std::shared_ptr<Characteristic> LockPhysicalControls() {
-    auto c = std::make_shared<Characteristic>(kType_LockPhysicalControls, Format::UInt8, PERM_PR_PW_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0)); // Control Lock Disabled
-    return c;
-}
-
-std::shared_ptr<Characteristic> LockManagementAutoSecurityTimeout() {
-    auto c = std::make_shared<Characteristic>(kType_LockManagementAutoSecurityTimeout, Format::UInt32, PERM_PR_PW_NT);
-    c->set_unit("seconds");
-    c->set_value(static_cast<uint32_t>(0));
-    return c;
-}
-
-std::shared_ptr<Characteristic> LockLastKnownAction() {
-    auto c = std::make_shared<Characteristic>(kType_LockLastKnownAction, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(10);
-    c->set_value(static_cast<uint8_t>(0));
-    return c;
-}
-
-std::shared_ptr<Characteristic> Logs() {
-    auto c = std::make_shared<Characteristic>(kType_Logs, Format::TLV8, PERM_PR_NT);
-    return c;
-}
-
-//==============================================================================
-// Miscellaneous Characteristics
-//==============================================================================
-
-std::shared_ptr<Characteristic> Version() {
-    auto c = std::make_shared<Characteristic>(kType_Version, Format::String, PERM_PR);
-    c->set_value(std::string("1.0.0"));
-    return c;
-}
-
-std::shared_ptr<Characteristic> AdministratorOnlyAccess() {
-    auto c = std::make_shared<Characteristic>(kType_AdministratorOnlyAccess, Format::Bool, PERM_PR_PW_NT);
-    c->set_value(false);
-    return c;
-}
-
-std::shared_ptr<Characteristic> AudioFeedback() {
-    auto c = std::make_shared<Characteristic>(kType_AudioFeedback, Format::Bool, PERM_PR_PW_NT);
-    c->set_value(false);
-    return c;
-}
-
-std::shared_ptr<Characteristic> StatusJammed() {
-    auto c = std::make_shared<Characteristic>(kType_StatusJammed, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0)); // Not Jammed
-    return c;
-}
-
-std::shared_ptr<Characteristic> SecuritySystemAlarmType() {
-    auto c = std::make_shared<Characteristic>(kType_SecuritySystemAlarmType, Format::UInt8, PERM_PR_NT);
-    c->set_min_value(0);
-    c->set_max_value(1);
-    c->set_value(static_cast<uint8_t>(0));
-    return c;
+using core::Format;
+
+namespace {
+const uint8_t kHwFinishTlv8[] = {0x01, 0x04, 0xce, 0xd5, 0xda, 0x00};
+const uint8_t kNfcControlTlv8[] = {0x01, 0x00};
+const uint8_t kNfcSupportedTlv8[] = {0x01, 0x01, 0x10, 0x02, 0x01, 0x10};
+} // namespace
+
+// Positional: row order must match the CharId enum order.
+const CharacteristicDesc kCharacteristics[static_cast<size_t>(CharId::Count)] = {
+    {.type = kType_AccessoryFlags, .format = Format::UInt32, .permissions = kPermPRNT, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_FirmwareRevision, .format = Format::String, .permissions = kPermPR, .default_kind = CharacteristicDesc::DefaultKind::String, .default_string = "1.0.0"},
+    {.type = kType_HardwareRevision, .format = Format::String, .permissions = kPermPR, .default_kind = CharacteristicDesc::DefaultKind::String, .default_string = "1.0.0"},
+    {.type = kType_Identify, .format = Format::Bool, .permissions = kPermPRPW, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_Manufacturer, .format = Format::String, .permissions = kPermPR, .max_len = 64, .has_max_len = true, .default_kind = CharacteristicDesc::DefaultKind::String, .default_string = ""},
+    {.type = kType_Model, .format = Format::String, .permissions = kPermPR, .max_len = 64, .has_max_len = true, .default_kind = CharacteristicDesc::DefaultKind::String, .default_string = ""},
+    {.type = kType_Name, .format = Format::String, .permissions = kPermPR, .max_len = 64, .has_max_len = true, .default_kind = CharacteristicDesc::DefaultKind::String, .default_string = ""},
+    {.type = kType_SerialNumber, .format = Format::String, .permissions = kPermPR, .max_len = 64, .has_max_len = true, .default_kind = CharacteristicDesc::DefaultKind::String, .default_string = ""},
+    {.type = kType_HardwareFinish, .format = Format::TLV8, .permissions = kPermPR, .default_kind = CharacteristicDesc::DefaultKind::Tlv8, .tlv8_default_data = kHwFinishTlv8, .tlv8_default_len = 6},
+    {.type = kType_On, .format = Format::Bool, .permissions = kPermPRPWNT, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_Brightness, .format = Format::Int, .permissions = kPermPRPWNT, .unit = "percentage", .has_unit = true, .min_value = 0, .has_min = true, .max_value = 100, .has_max = true, .min_step = 1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 100},
+    {.type = kType_Hue, .format = Format::Float, .permissions = kPermPRPWNT, .unit = "arcdegrees", .has_unit = true, .min_value = 0, .has_min = true, .max_value = 360, .has_max = true, .min_step = 1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0.0},
+    {.type = kType_Saturation, .format = Format::Float, .permissions = kPermPRPWNT, .unit = "percentage", .has_unit = true, .min_value = 0, .has_min = true, .max_value = 100, .has_max = true, .min_step = 1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0.0},
+    {.type = kType_ColorTemperature, .format = Format::UInt32, .permissions = kPermPRPWNT, .min_value = 140, .has_min = true, .max_value = 500, .has_max = true, .min_step = 1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 200},
+    {.type = kType_CurrentTemperature, .format = Format::Float, .permissions = kPermPRNT, .unit = "celsius", .has_unit = true, .min_value = 0, .has_min = true, .max_value = 100, .has_max = true, .min_step = 0.1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 20.0},
+    {.type = kType_TargetTemperature, .format = Format::Float, .permissions = kPermPRPWNT, .unit = "celsius", .has_unit = true, .min_value = 10, .has_min = true, .max_value = 38, .has_max = true, .min_step = 0.1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 20.0},
+    {.type = kType_TemperatureDisplayUnits, .format = Format::UInt8, .permissions = kPermPRPWNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_CurrentHeatingCoolingState, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 2, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_TargetHeatingCoolingState, .format = Format::UInt8, .permissions = kPermPRPWNT, .min_value = 0, .has_min = true, .max_value = 3, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_CoolingThresholdTemperature, .format = Format::Float, .permissions = kPermPRPWNT, .unit = "celsius", .has_unit = true, .min_value = 10, .has_min = true, .max_value = 35, .has_max = true, .min_step = 0.1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 26.0},
+    {.type = kType_HeatingThresholdTemperature, .format = Format::Float, .permissions = kPermPRPWNT, .unit = "celsius", .has_unit = true, .min_value = 0, .has_min = true, .max_value = 25, .has_max = true, .min_step = 0.1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 18.0},
+    {.type = kType_CurrentRelativeHumidity, .format = Format::Float, .permissions = kPermPRNT, .unit = "percentage", .has_unit = true, .min_value = 0, .has_min = true, .max_value = 100, .has_max = true, .min_step = 1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 50.0},
+    {.type = kType_TargetRelativeHumidity, .format = Format::Float, .permissions = kPermPRPWNT, .unit = "percentage", .has_unit = true, .min_value = 0, .has_min = true, .max_value = 100, .has_max = true, .min_step = 1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 50.0},
+    {.type = kType_CurrentDoorState, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 4, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 1},
+    {.type = kType_TargetDoorState, .format = Format::UInt8, .permissions = kPermPRPWNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 1},
+    {.type = kType_ObstructionDetected, .format = Format::Bool, .permissions = kPermPRNT, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_LockCurrentState, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 3, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 1},
+    {.type = kType_LockTargetState, .format = Format::UInt8, .permissions = kPermPRPWNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 1},
+    {.type = kType_Active, .format = Format::UInt8, .permissions = kPermPRPWNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_CurrentFanState, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 2, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_TargetFanState, .format = Format::UInt8, .permissions = kPermPRPWNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_RotationDirection, .format = Format::Int, .permissions = kPermPRPWNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_RotationSpeed, .format = Format::Float, .permissions = kPermPRPWNT, .unit = "percentage", .has_unit = true, .min_value = 0, .has_min = true, .max_value = 100, .has_max = true, .min_step = 1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0.0},
+    {.type = kType_SwingMode, .format = Format::UInt8, .permissions = kPermPRPWNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_CurrentPosition, .format = Format::UInt8, .permissions = kPermPRNT, .unit = "percentage", .has_unit = true, .min_value = 0, .has_min = true, .max_value = 100, .has_max = true, .min_step = 1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_TargetPosition, .format = Format::UInt8, .permissions = kPermPRPWNT, .unit = "percentage", .has_unit = true, .min_value = 0, .has_min = true, .max_value = 100, .has_max = true, .min_step = 1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_PositionState, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 2, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 2},
+    {.type = kType_HoldPosition, .format = Format::Bool, .permissions = kPermPW, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_MotionDetected, .format = Format::Bool, .permissions = kPermPRNT, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_OccupancyDetected, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_ContactSensorState, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_LeakDetected, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_SmokeDetected, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_CarbonMonoxideDetected, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_CarbonMonoxideLevel, .format = Format::Float, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 100, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0.0},
+    {.type = kType_CarbonDioxideDetected, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_CarbonDioxideLevel, .format = Format::Float, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 100000, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0.0},
+    {.type = kType_CurrentAmbientLightLevel, .format = Format::Float, .permissions = kPermPRNT, .unit = "lux", .has_unit = true, .min_value = 0.0001, .has_min = true, .max_value = 100000, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 1.0},
+    {.type = kType_AirQuality, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 5, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_PM2_5Density, .format = Format::Float, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1000, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0.0},
+    {.type = kType_PM10Density, .format = Format::Float, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1000, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0.0},
+    {.type = kType_VOCDensity, .format = Format::Float, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1000, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0.0},
+    {.type = kType_SecuritySystemCurrentState, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 4, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 3},
+    {.type = kType_SecuritySystemTargetState, .format = Format::UInt8, .permissions = kPermPRPWNT, .min_value = 0, .has_min = true, .max_value = 3, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 3},
+    {.type = kType_BatteryLevel, .format = Format::UInt8, .permissions = kPermPRNT, .unit = "percentage", .has_unit = true, .min_value = 0, .has_min = true, .max_value = 100, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 100},
+    {.type = kType_ChargingState, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 2, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_StatusLowBattery, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_StatusActive, .format = Format::Bool, .permissions = kPermPRNT, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 1},
+    {.type = kType_StatusFault, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_StatusTampered, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_OutletInUse, .format = Format::Bool, .permissions = kPermPRNT, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_Volume, .format = Format::UInt8, .permissions = kPermPRPWNT, .unit = "percentage", .has_unit = true, .min_value = 0, .has_min = true, .max_value = 100, .has_max = true, .min_step = 1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 50},
+    {.type = kType_Mute, .format = Format::Bool, .permissions = kPermPRPWNT, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_ProgrammableSwitchEvent, .format = Format::UInt8, .permissions = core::Permissions{core::Permission::PairedRead, core::Permission::Notify}, .min_value = 0, .has_min = true, .max_value = 2, .has_max = true},
+    {.type = kType_ServiceLabelIndex, .format = Format::UInt8, .permissions = kPermPR, .min_value = 1, .has_min = true, .max_value = 255, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 1},
+    {.type = kType_ServiceLabelNamespace, .format = Format::UInt8, .permissions = kPermPR, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 1},
+    {.type = kType_InUse, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_IsConfigured, .format = Format::UInt8, .permissions = kPermPRPWNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_RemainingDuration, .format = Format::UInt32, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 3600, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_SetDuration, .format = Format::UInt32, .permissions = kPermPRPWNT, .min_value = 0, .has_min = true, .max_value = 3600, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_ValveType, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 3, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_ProgramMode, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 2, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_CurrentAirPurifierState, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 2, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_TargetAirPurifierState, .format = Format::UInt8, .permissions = kPermPRPWNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_CurrentHeaterCoolerState, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 3, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_TargetHeaterCoolerState, .format = Format::UInt8, .permissions = kPermPRPWNT, .min_value = 0, .has_min = true, .max_value = 2, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_CurrentHumidifierDehumidifierState, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 3, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_TargetHumidifierDehumidifierState, .format = Format::UInt8, .permissions = kPermPRPWNT, .min_value = 0, .has_min = true, .max_value = 2, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_WaterLevel, .format = Format::Float, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 100, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0.0},
+    {.type = kType_RelativeHumidityDehumidifierThreshold, .format = Format::Float, .permissions = kPermPRPWNT, .unit = "percentage", .has_unit = true, .min_value = 0, .has_min = true, .max_value = 100, .has_max = true, .min_step = 1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 50.0},
+    {.type = kType_RelativeHumidityHumidifierThreshold, .format = Format::Float, .permissions = kPermPRPWNT, .unit = "percentage", .has_unit = true, .min_value = 0, .has_min = true, .max_value = 100, .has_max = true, .min_step = 1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 50.0},
+    {.type = kType_FilterLifeLevel, .format = Format::Float, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 100, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 100.0},
+    {.type = kType_FilterChangeIndication, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_ResetFilterIndication, .format = Format::UInt8, .permissions = kPermPW, .min_value = 1, .has_min = true, .max_value = 1, .has_max = true},
+    {.type = kType_CurrentSlatState, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 2, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_SlatType, .format = Format::UInt8, .permissions = kPermPR, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_CurrentTiltAngle, .format = Format::Int, .permissions = kPermPRNT, .unit = "arcdegrees", .has_unit = true, .min_value = -90, .has_min = true, .max_value = 90, .has_max = true, .min_step = 1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_TargetTiltAngle, .format = Format::Int, .permissions = kPermPRPWNT, .unit = "arcdegrees", .has_unit = true, .min_value = -90, .has_min = true, .max_value = 90, .has_max = true, .min_step = 1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_CurrentHorizontalTiltAngle, .format = Format::Int, .permissions = kPermPRNT, .unit = "arcdegrees", .has_unit = true, .min_value = -90, .has_min = true, .max_value = 90, .has_max = true, .min_step = 1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_TargetHorizontalTiltAngle, .format = Format::Int, .permissions = kPermPRPWNT, .unit = "arcdegrees", .has_unit = true, .min_value = -90, .has_min = true, .max_value = 90, .has_max = true, .min_step = 1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_CurrentVerticalTiltAngle, .format = Format::Int, .permissions = kPermPRNT, .unit = "arcdegrees", .has_unit = true, .min_value = -90, .has_min = true, .max_value = 90, .has_max = true, .min_step = 1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_TargetVerticalTiltAngle, .format = Format::Int, .permissions = kPermPRPWNT, .unit = "arcdegrees", .has_unit = true, .min_value = -90, .has_min = true, .max_value = 90, .has_max = true, .min_step = 1, .has_step = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_OzoneDensity, .format = Format::Float, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1000, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0.0},
+    {.type = kType_NitrogenDioxideDensity, .format = Format::Float, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1000, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0.0},
+    {.type = kType_SulphurDioxideDensity, .format = Format::Float, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1000, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0.0},
+    {.type = kType_AirParticulateDensity, .format = Format::Float, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1000, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0.0},
+    {.type = kType_AirParticulateSize, .format = Format::UInt8, .permissions = kPermPR, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_CarbonMonoxidePeakLevel, .format = Format::Float, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 100, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0.0},
+    {.type = kType_CarbonDioxidePeakLevel, .format = Format::Float, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 100000, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0.0},
+    {.type = kType_NFCAccessControlPoint, .format = Format::TLV8, .permissions = kPermPRPWWr, .default_kind = CharacteristicDesc::DefaultKind::Tlv8, .tlv8_default_data = kNfcControlTlv8, .tlv8_default_len = 2},
+    {.type = kType_NFCAccessSupportedConfiguration, .format = Format::TLV8, .permissions = kPermPR, .default_kind = CharacteristicDesc::DefaultKind::Tlv8, .tlv8_default_data = kNfcSupportedTlv8, .tlv8_default_len = 6},
+    {.type = kType_ConfigurationState, .format = Format::UInt16, .permissions = kPermPRNT, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_LockControlPoint, .format = Format::TLV8, .permissions = kPermPW},
+    {.type = kType_LockPhysicalControls, .format = Format::UInt8, .permissions = kPermPRPWNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_LockManagementAutoSecurityTimeout, .format = Format::UInt32, .permissions = kPermPRPWNT, .unit = "seconds", .has_unit = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_LockLastKnownAction, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 10, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_Logs, .format = Format::TLV8, .permissions = kPermPRNT},
+    {.type = kType_Version, .format = Format::String, .permissions = kPermPR, .default_kind = CharacteristicDesc::DefaultKind::String, .default_string = "1.0.0"},
+    {.type = kType_AdministratorOnlyAccess, .format = Format::Bool, .permissions = kPermPRPWNT, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_AudioFeedback, .format = Format::Bool, .permissions = kPermPRPWNT, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_StatusJammed, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+    {.type = kType_SecuritySystemAlarmType, .format = Format::UInt8, .permissions = kPermPRNT, .min_value = 0, .has_min = true, .max_value = 1, .has_max = true, .default_kind = CharacteristicDesc::DefaultKind::Number, .default_number = 0},
+};
+
+const CharacteristicDesc* find_characteristic_desc(uint64_t type) {
+    for (const auto& desc : kCharacteristics) {
+        if (desc.type == type) return &desc;
+    }
+    return nullptr;
+}
+
+namespace {
+// Materialize the compact default into a typed Value matching the format.
+core::Value default_value_for(const CharacteristicDesc& desc) {
+    switch (desc.default_kind) {
+        case CharacteristicDesc::DefaultKind::Number:
+            switch (desc.format) {
+                case Format::Bool:   return desc.default_number != 0.0;
+                case Format::UInt8:  return static_cast<uint8_t>(desc.default_number);
+                case Format::UInt16: return static_cast<uint16_t>(desc.default_number);
+                case Format::UInt32: return static_cast<uint32_t>(desc.default_number);
+                case Format::UInt64: return static_cast<uint64_t>(desc.default_number);
+                case Format::Int:    return static_cast<int32_t>(desc.default_number);
+                case Format::Float:  return static_cast<float>(desc.default_number);
+                default:             return static_cast<float>(desc.default_number);
+            }
+        case CharacteristicDesc::DefaultKind::String:
+            return std::string(desc.default_string);
+        case CharacteristicDesc::DefaultKind::Tlv8:
+            return std::vector<uint8_t>(desc.tlv8_default_data,
+                                        desc.tlv8_default_data + desc.tlv8_default_len);
+        case CharacteristicDesc::DefaultKind::None:
+            break;
+    }
+    return core::Value{};
+}
+} // namespace
+
+std::unique_ptr<core::Characteristic> make_characteristic(const CharacteristicDesc& desc) {
+    auto c = std::make_unique<core::Characteristic>(desc.type, desc.format, desc.permissions);
+    if (desc.has_unit) c->set_unit(std::string(desc.unit));
+    if (desc.has_min) c->set_min_value(desc.min_value);
+    if (desc.has_max) c->set_max_value(desc.max_value);
+    if (desc.has_step) c->set_min_step(desc.min_step);
+    if (desc.has_max_len) c->set_max_len(desc.max_len);
+    if (desc.default_kind != CharacteristicDesc::DefaultKind::None) {
+        c->set_value(default_value_for(desc));
+    }
+    return c;
+}
+
+std::unique_ptr<core::Characteristic> make_characteristic(CharId id) {
+    return make_characteristic(kCharacteristics[static_cast<size_t>(id)]);
 }
 
 } // namespace hap::characteristic
+
+#pragma GCC diagnostic pop

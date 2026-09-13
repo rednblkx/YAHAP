@@ -224,6 +224,7 @@ public:
 
     void on_read(ReadCallback cb) { read_cb_ = std::move(cb); }
     void set_write_callback(WriteCallback callback) { write_callback_ = std::move(callback); }
+    const WriteCallback& write_callback() const { return write_callback_; }
     void set_event_callback(EventCallback callback) { event_callback_ = std::move(callback); }
     void set_write_response_callback(WriteResponseCallback callback) { write_response_callback_ = std::move(callback); }
     

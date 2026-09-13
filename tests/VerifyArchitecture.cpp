@@ -35,19 +35,19 @@ int main() {
 
   hap::AccessoryServer server(config);
 
-  auto acc = std::make_shared<hap::core::Accessory>(1);
-  auto svc = std::make_shared<hap::core::Service>(
+  auto acc = std::make_unique<hap::core::Accessory>(1);
+  auto svc = std::make_unique<hap::core::Service>(
       0x3E, "Lightbulb"); // 0x3E is Lightbulb service type
-  auto char_on = std::make_shared<hap::core::Characteristic>(
+  auto char_on = std::make_unique<hap::core::Characteristic>(
       0x25, // On characteristic type
       hap::core::Format::Bool,
       hap::core::Permissions{hap::core::Permission::PairedRead,
                              hap::core::Permission::PairedWrite,
                              hap::core::Permission::Notify});
 
-  svc->add_characteristic(char_on);
-  acc->add_service(svc);
-  server.add_accessory(acc);
+  svc->add_characteristic(std::move(char_on));
+  acc->add_service(std::move(svc));
+  server.add_accessory(std::move(acc));
 
   server.start();
   server.stop();

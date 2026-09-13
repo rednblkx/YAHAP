@@ -9,6 +9,7 @@
 #include "Esp32Crypto.hpp"
 #include "Esp32Platform.hpp"
 #include "Esp32Storage.hpp"
+#include "esp_log_level.h"
 #include "hap/AccessoryServer.hpp"
 #include "hap/transport/BleTransport.hpp"
 #include "hap/core/Accessory.hpp"
@@ -61,36 +62,39 @@ extern "C" void app_main() {
 
     static hap::AccessoryServer server(std::move(config));
 
-    auto accessory = std::make_shared<hap::core::Accessory>(1);
+    auto accessory = std::make_unique<hap::core::Accessory>(1);
+
+    namespace chr = hap::characteristic;
 
     // Accessory Information Service
-    auto info_service = hap::service::AccessoryInformationBuilder()
-        .name("ESP32 Light")
-        .manufacturer("Espressif")
-        .model("ESP32-BLE-01")
-        .serial_number("4923678")
-        .firmware_revision("1.0.0")
-        .hardware_revision("ESP32-C6")
-        .on_identify([]() {
+    hap::service::ServiceBuilder info(hap::service::kType_AccessoryInformation,
+                                      "Accessory Information");
+    info.add(chr::CharId::Name, "ESP32 Light")
+        .add(chr::CharId::Manufacturer, "Espressif")
+        .add(chr::CharId::Model, "ESP32-BLE-01")
+        .add(chr::CharId::SerialNumber, "4923678")
+        .add(chr::CharId::FirmwareRevision, "1.0.0")
+        .add(chr::CharId::Identify)
+        .on_write_bool([]() {
             ESP_LOGI(TAG, "Identify!");
         })
-        .build();
-    accessory->add_service(info_service);
+        .add(chr::CharId::HardwareRevision, "ESP32-C6");
+    accessory->add_service(info.build());
 
     // Lightbulb Service
-    auto light_builder = hap::service::LightBulbBuilder();
-    light_builder.with_brightness()
-        .on_change([](bool on) {
-            ESP_LOGI(TAG, "Light is %s", on ? "ON" : "OFF");
-        })
-        .on_brightness_change([](int brightness) {
-            ESP_LOGI(TAG, "Brightness is %d", brightness);
-        });
-    
-    auto light_service = light_builder.build();
-    accessory->add_service(light_service);
-    
-    server.add_accessory(accessory);
+    accessory->add_service(
+        hap::service::ServiceBuilder(hap::service::kType_LightBulb, "Lightbulb", true)
+            .add(chr::CharId::On)
+            .on_write_bool([](bool on) {
+                ESP_LOGI(TAG, "Light is %s", on ? "ON" : "OFF");
+            })
+            .add(chr::CharId::Brightness)
+            .on_write_int([](int brightness) {
+                ESP_LOGI(TAG, "Brightness is %d", brightness);
+            })
+            .build());
+
+    ESP_ERROR_CHECK(server.add_accessory(std::move(accessory)) ? ESP_OK : ESP_FAIL);
 
     ESP_LOGI(TAG, "Starting Server...");
     server.start();

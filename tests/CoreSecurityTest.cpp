@@ -310,13 +310,22 @@ void test_http_rejects_unknown_method() {
 void test_lock_write_fires_events() {
     using namespace hap::core;
 
-    auto lock = hap::service::LockMechanismBuilder()
-        .on_lock_change([](bool) { /* app notification hook */ })
-        .build();
-    auto& chars = lock->characteristics();
+    hap::service::ServiceBuilder lock(hap::service::kType_LockMechanism, "Lock Mechanism", true);
+    hap::core::Characteristic* lock_current =
+        lock.add(hap::characteristic::CharId::LockCurrentStateChar).get();
+    lock.add(hap::characteristic::CharId::LockTargetStateChar)
+        .on_write(
+                  [lock_current](const Value& v) -> WriteResponse {
+                      // HAP 8.4: LockCurrentState follows LockTargetState.
+                      auto* target = std::get_if<uint8_t>(&v);
+                      if (target) lock_current->set_value(*target, EventSource{});
+                      return std::nullopt;
+                  });
+    auto svc = lock.build();
+    auto& chars = svc->characteristics();
     CHECK_EQ(chars.size(), 2);
-    auto current = chars[0];
-    auto target = chars[1];
+    auto* current = chars[0].get();
+    auto* target = chars[1].get();
 
     int current_events = 0;
     int target_events = 0;
@@ -366,6 +375,45 @@ void test_lock_write_fires_events() {
     // write does NOT propagate; document the contract: propagation happens
     // only for controller-driven writes.
     CHECK_EQ(current_events, 0);
+}
+
+// Multiple on_write* calls on one characteristic must COMPOSE, not overwrite:
+// the builder installs callbacks in order and each runs in turn. This is what
+// keeps lock state propagation alive alongside a logging callback — a second
+// on_write used to clobber the first, leaving a controller stuck at
+// "Unlocking..." because LockCurrentState never followed LockTargetState.
+void test_builder_write_callbacks_compose() {
+    using namespace hap::core;
+
+    hap::service::ServiceBuilder lock(hap::service::kType_LockMechanism, "Lock Mechanism", true);
+    hap::core::Characteristic* lock_current =
+        lock.add(hap::characteristic::CharId::LockCurrentStateChar).get();
+    lock.add(hap::characteristic::CharId::LockTargetStateChar)
+        .on_write(
+                  [lock_current](const Value& v) -> WriteResponse {
+                      auto* target = std::get_if<uint8_t>(&v);
+                      if (target) lock_current->set_value(*target, EventSource{});
+                      return std::nullopt;
+                  })
+        .on_write_bool([](bool locked) { (void)locked; });
+    auto svc = lock.build();
+    auto& chars = svc->characteristics();
+    auto* current = chars[0].get();
+    auto* target = chars[1].get();
+
+    current->set_dispatcher([](std::function<void()> work) { work(); });
+
+    int current_events = 0;
+    current->set_event_callback([&](const Value&, const EventSource&) { ++current_events; });
+
+    // A controller write must propagate to LockCurrentState (callback 1) AND
+    // invoke the bool log callback (callback 2).
+    auto result = target->set_value(static_cast<uint8_t>(1), EventSource::from_connection(3));
+    CHECK(!result.has_value());
+    CHECK_EQ(current_events, 1);
+    auto v = current->get_value();
+    CHECK(std::holds_alternative<Value>(v));
+    CHECK_EQ(std::get<uint8_t>(std::get<Value>(v)), 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -452,6 +500,7 @@ int main() {
     RUN_TEST(test_http_rejects_oversized_header_line);
     RUN_TEST(test_http_rejects_unknown_method);
     RUN_TEST(test_lock_write_fires_events);
+    RUN_TEST(test_builder_write_callbacks_compose);
     RUN_TEST(test_pair_verify_m4_cleartext_then_upgrade);
     return 0;
 }

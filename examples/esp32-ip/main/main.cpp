@@ -75,45 +75,59 @@ extern "C" void app_main() {
 
   static hap::AccessoryServer server(std::move(config));
 
-  auto accessory = std::make_shared<hap::core::Accessory>(1);
+  auto accessory = std::make_unique<hap::core::Accessory>(1);
+
+  namespace chr = hap::characteristic;
 
   // Accessory Information Service
-  auto info_service = hap::service::AccessoryInformationBuilder()
-                          .name("ESP32-Lock-IP")
-                          .manufacturer("Example Corp")
-                          .model("HAP-Lock-IP-v1")
-                          .serial_number("00000001")
-                          .firmware_revision("1.0.0")
-                          .hardware_revision("1.0.0")
-                          .on_identify([]() { ESP_LOGI(TAG, "Identify!"); })
-                          .build();
-  accessory->add_service(info_service);
+  hap::service::ServiceBuilder info(hap::service::kType_AccessoryInformation,
+                                    "Accessory Information");
+  info.add(chr::CharId::Name, "ESP32-Lock-IP")
+      .add(chr::CharId::Manufacturer, "Example Corp")
+      .add(chr::CharId::Model, "HAP-Lock-IP-v1")
+      .add(chr::CharId::SerialNumber, "00000001")
+      .add(chr::CharId::FirmwareRevision, "1.0.0")
+      .add(chr::CharId::Identify)
+      .on_write_bool([] { ESP_LOGI(TAG, "Identify!"); })
+      .add(chr::CharId::HardwareRevision, "1.0.0");
+  accessory->add_service(info.build());
 
   // Protocol Information Service
-  std::shared_ptr<hap::core::Service> protocol_info_service =
-      hap::service::HAPProtocolInformationBuilder().build();
-  accessory->add_service(protocol_info_service);
+  accessory->add_service(
+      hap::service::ServiceBuilder(hap::service::kType_HAPProtocolInformation,
+                                   "Protocol Information")
+          .add(chr::CharId::Version)
+          .build());
 
   // Lock Service
-  std::shared_ptr<hap::core::Service> lock_service =
-      hap::service::LockMechanismBuilder()
-          .on_lock_change([](bool locked) {
-            ESP_LOGI(TAG, "Lock is %s", locked ? "LOCKED" : "UNLOCKED");
-          })
-          .build();
-  accessory->add_service(lock_service);
+  hap::service::ServiceBuilder lock(hap::service::kType_LockMechanism, "Lock Mechanism", true);
+  hap::core::Characteristic* lock_current = lock.add(chr::CharId::LockCurrentStateChar).get();
+  lock.add(chr::CharId::LockTargetStateChar)
+      .on_write(
+                [lock_current](const hap::core::Value& v) -> hap::core::WriteResponse {
+                    // HAP 8.4: LockCurrentState follows LockTargetState.
+                    auto* target = std::get_if<uint8_t>(&v);
+                    if (target) lock_current->set_value(*target, hap::core::EventSource{});
+                    return std::nullopt;
+                })
+      .on_write_bool([](bool locked) {
+          ESP_LOGI(TAG, "Lock is %s", locked ? "LOCKED" : "UNLOCKED");
+      });
+  accessory->add_service(lock.build());
 
   // Lock Management Service
-  auto lock_mgmt_builder = hap::service::LockManagementBuilder();
-  lock_mgmt_builder
-      .on_control_point([](const std::vector<uint8_t> &tlv) {
-        ESP_LOGI(TAG, "Control Point TLV Received(size=%d):", tlv.size());
-        ESP_LOG_BUFFER_HEX(TAG, tlv.data(), tlv.size());
-      })
-      .build();
-  accessory->add_service(lock_mgmt_builder.build());
+  accessory->add_service(
+      hap::service::ServiceBuilder(hap::service::kType_LockManagement, "Lock Management")
+          .add(chr::CharId::LockControlPoint)
+          .on_write_tlv(
+                        [](const std::vector<uint8_t> &tlv) {
+                            ESP_LOGI(TAG, "Control Point TLV Received(size=%d):", (int)tlv.size());
+                            ESP_LOG_BUFFER_HEX(TAG, tlv.data(), tlv.size());
+                        })
+          .add(chr::CharId::Version)
+          .build());
 
-  ESP_ERROR_CHECK(server.add_accessory(accessory) ? ESP_OK : ESP_FAIL);
+  ESP_ERROR_CHECK(server.add_accessory(std::move(accessory)) ? ESP_OK : ESP_FAIL);
 
   ESP_LOGI(TAG, "Starting Server...");
   server.start();

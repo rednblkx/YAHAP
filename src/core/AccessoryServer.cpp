@@ -193,8 +193,10 @@ AccessoryServer::~AccessoryServer() {
     }
 }
 
-bool AccessoryServer::add_accessory(std::shared_ptr<core::Accessory> accessory) {
-    auto result = database_.add_accessory(accessory);
+bool AccessoryServer::add_accessory(std::unique_ptr<core::Accessory> accessory) {
+    // Capture what we need before ownership transfers to the database.
+    const uint64_t aid = accessory->aid();
+    auto result = database_.add_accessory(std::move(accessory));
     if (result != core::ValidationResult::Success) {
         HAP_LOG_ERROR(config_.system,
             "[AccessoryServer] add_accessory rejected: ", core::validation_result_str(result));
@@ -202,8 +204,8 @@ bool AccessoryServer::add_accessory(std::shared_ptr<core::Accessory> accessory) 
     }
     
     // Register event callbacks
-    uint64_t aid = accessory->aid();
-    for (const auto& service : accessory->services()) {
+    core::Accessory* acc_ptr = database_.accessories().back().get();
+    for (const auto& service : acc_ptr->services()) {
         for (const auto& characteristic : service->characteristics()) {
             if (core::has_permission(characteristic->permissions(), core::Permission::Notify)) {
                 auto ch_ptr = characteristic.get();

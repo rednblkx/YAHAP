@@ -61,11 +61,11 @@ public:
     Accessory(uint64_t aid) : aid_(aid) {}
     virtual ~Accessory() = default;
 
-    void add_service(std::shared_ptr<Service> service) {
+    void add_service(std::unique_ptr<Service> service) {
         services_.push_back(std::move(service));
     }
 
-    const std::vector<std::shared_ptr<Service>>& services() const {
+    const std::vector<std::unique_ptr<Service>>& services() const {
         return services_;
     }
 
@@ -73,7 +73,7 @@ public:
 
 private:
     uint64_t aid_;
-    std::vector<std::shared_ptr<Service>> services_;
+    std::vector<std::unique_ptr<Service>> services_;
 };
 
 } // namespace hap::core

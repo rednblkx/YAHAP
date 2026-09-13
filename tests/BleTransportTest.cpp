@@ -405,15 +405,15 @@ void test_timed_write_fires_connected_event() {
     // The user characteristic must exist BEFORE the transport starts so it
     // gets registered as a GATT characteristic.
     core::AttributeDatabase db;
-    auto acc = std::make_shared<core::Accessory>(1);
-    auto svc = std::make_shared<core::Service>(0x43, "Lightbulb");
-    auto on_char = std::make_shared<core::Characteristic>(
+    auto acc = std::make_unique<core::Accessory>(1);
+    auto svc = std::make_unique<core::Service>(0x43, "Lightbulb");
+    auto on_char = std::make_unique<core::Characteristic>(
         0x25, core::Format::Bool,
         core::Permissions{core::Permission::PairedRead, core::Permission::PairedWrite,
                     core::Permission::Notify, core::Permission::TimedWrite});
-    svc->add_characteristic(on_char);
-    acc->add_service(svc);
-    db.add_accessory(acc);
+    svc->add_characteristic(std::move(on_char));
+    acc->add_service(std::move(svc));
+    db.add_accessory(std::move(acc));
 
     BleTransport::Config config;
     config.ble = &ble;
@@ -465,8 +465,9 @@ void test_timed_write_fires_connected_event() {
                                  static_cast<uint8_t>(iid >> 8)};
     ble.write(kOnUUID, 1, exec, false);
 
-    // The characteristic value must have been applied...
-    auto v = on_char->get_value();
+    // The characteristic value must have been applied... (ownership moved
+    // into the service; reach it through the accessory in the database)
+    auto v = db.accessories()[0]->services()[0]->characteristics()[0]->get_value();
     CHECK(std::holds_alternative<core::Value>(v));
     CHECK(std::get<bool>(std::get<core::Value>(v)) == true);
 
@@ -493,10 +494,21 @@ void test_lock_timed_write_notifies_writer_connection() {
     MockPairingEndpoints endpoints;
 
     core::AttributeDatabase db;
-    auto acc = std::make_shared<core::Accessory>(1);
-    auto lock = hap::service::LockMechanismBuilder().on_lock_change([](bool) {}).build();
-    acc->add_service(lock);
-    CHECK_EQ(db.add_accessory(acc), core::ValidationResult::Success);
+    auto acc = std::make_unique<core::Accessory>(1);
+    hap::service::ServiceBuilder lock_builder(hap::service::kType_LockMechanism, "Lock Mechanism", true);
+    hap::core::Characteristic* lock_current;
+    lock_builder.add(hap::characteristic::CharId::LockCurrentStateChar, &lock_current)
+        .add(hap::characteristic::CharId::LockTargetStateChar)
+        .on_write(hap::characteristic::kType_LockTargetState,
+                  [lock_current](const hap::core::Value& v) -> hap::core::WriteResponse {
+                      // HAP 8.4: LockCurrentState follows LockTargetState.
+                      auto* target = std::get_if<uint8_t>(&v);
+                      if (target) lock_current->set_value(*target, hap::core::EventSource{});
+                      return std::nullopt;
+                  });
+    auto lock = lock_builder.build();
+    acc->add_service(std::move(lock));
+    CHECK_EQ(db.add_accessory(std::move(acc)), core::ValidationResult::Success);
 
     BleTransport::Config config;
     config.ble = &ble;
@@ -513,7 +525,7 @@ void test_lock_timed_write_notifies_writer_connection() {
     ble.subscribe("0000001D-0000-1000-8000-0026BB765291", 0, true); // CurrentState
     ble.subscribe("0000001E-0000-1000-8000-0026BB765291", 0, true); // TargetState
 
-    auto& chars = lock->characteristics();
+    auto& chars = db.accessories()[0]->services()[0]->characteristics();
     uint16_t tgt_iid = static_cast<uint16_t>(chars[1]->iid());
 
     auto pdu_for = [&](uint8_t op, uint8_t tid, const std::vector<uint8_t>& tlvs) {

@@ -9,7 +9,7 @@ using namespace hap::core;
 using JsonValue = hap::common::JsonValue;
 
 void test_characteristic_json() {
-    auto c = std::make_shared<Characteristic>(
+    auto c = std::make_unique<Characteristic>(
         0x23, // Name characteristic type
         Format::String,
         Permissions{Permission::PairedRead}
@@ -17,11 +17,11 @@ void test_characteristic_json() {
     c->set_value(std::string("Test Device"));
 
     AttributeDatabase db;
-    auto acc = std::make_shared<Accessory>(1);
-    auto svc = std::make_shared<Service>(0x3E, "Test");
-    svc->add_characteristic(c);
-    acc->add_service(svc);
-    db.add_accessory(acc);
+    auto acc = std::make_unique<Accessory>(1);
+    auto svc = std::make_unique<Service>(0x3E, "Test");
+    svc->add_characteristic(std::move(c));
+    acc->add_service(std::move(svc));
+    db.add_accessory(std::move(acc));
 
     std::string json_str = db.to_json_string();
     bool err = false;
@@ -52,26 +52,26 @@ void test_multi_accessory_json() {
     AttributeDatabase db;
 
     // Accessory 1 (Bridge)
-    auto acc1 = std::make_shared<Accessory>(1);
-    auto svc1 = std::make_shared<Service>(0x3E, "Bridge");
+    auto acc1 = std::make_unique<Accessory>(1);
+    auto svc1 = std::make_unique<Service>(0x3E, "Bridge");
 
-    auto name_char = std::make_shared<Characteristic>(0x23, Format::String, Permissions{Permission::PairedRead});
+    auto name_char = std::make_unique<Characteristic>(0x23, Format::String, Permissions{Permission::PairedRead});
     name_char->set_value(std::string("My Bridge"));
-    svc1->add_characteristic(name_char);
+    svc1->add_characteristic(std::move(name_char));
 
-    acc1->add_service(svc1);
-    db.add_accessory(acc1);
+    acc1->add_service(std::move(svc1));
+    db.add_accessory(std::move(acc1));
 
     // Accessory 2 (Lightbulb)
-    auto acc2 = std::make_shared<Accessory>(2);
-    auto svc2 = std::make_shared<Service>(0x43, "Lightbulb");
+    auto acc2 = std::make_unique<Accessory>(2);
+    auto svc2 = std::make_unique<Service>(0x43, "Lightbulb");
 
-    auto on_char = std::make_shared<Characteristic>(0x25, Format::Bool, Permissions{Permission::PairedRead, Permission::PairedWrite, Permission::Notify});
+    auto on_char = std::make_unique<Characteristic>(0x25, Format::Bool, Permissions{Permission::PairedRead, Permission::PairedWrite, Permission::Notify});
     on_char->set_value(true);
-    svc2->add_characteristic(on_char);
+    svc2->add_characteristic(std::move(on_char));
 
-    acc2->add_service(svc2);
-    db.add_accessory(acc2);
+    acc2->add_service(std::move(svc2));
+    db.add_accessory(std::move(acc2));
 
     std::string json_str = db.to_json_string();
     bool err = false;
@@ -121,13 +121,13 @@ void test_number_serialization() {
 
 void test_duplicate_aid_rejected() {
     AttributeDatabase db;
-    auto acc = std::make_shared<Accessory>(1);
-    acc->add_service(std::make_shared<Service>(0x3E, "A"));
-    CHECK_EQ(db.add_accessory(acc), ValidationResult::Success);
+    auto acc = std::make_unique<Accessory>(1);
+    acc->add_service(std::make_unique<Service>(0x3E, "A"));
+    CHECK_EQ(db.add_accessory(std::move(acc)), ValidationResult::Success);
     // Same AID again must be rejected, not silently accepted.
-    auto dup = std::make_shared<Accessory>(1);
-    dup->add_service(std::make_shared<Service>(0x3E, "B"));
-    CHECK_EQ(db.add_accessory(dup), ValidationResult::DuplicateAccessoryId);
+    auto dup = std::make_unique<Accessory>(1);
+    dup->add_service(std::make_unique<Service>(0x3E, "B"));
+    CHECK_EQ(db.add_accessory(std::move(dup)), ValidationResult::DuplicateAccessoryId);
     CHECK_EQ(db.accessories().size(), 1);
 }
 

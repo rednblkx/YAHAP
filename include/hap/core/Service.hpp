@@ -17,11 +17,11 @@ public:
 
     virtual ~Service() = default;
 
-    void add_characteristic(std::shared_ptr<Characteristic> characteristic) {
+    void add_characteristic(std::unique_ptr<Characteristic> characteristic) {
         characteristics_.push_back(std::move(characteristic));
     }
 
-    const std::vector<std::shared_ptr<Characteristic>>& characteristics() const {
+    const std::vector<std::unique_ptr<Characteristic>>& characteristics() const {
         return characteristics_;
     }
 
@@ -46,7 +46,7 @@ private:
     bool hidden_ = false;
     uint64_t iid_ = 0;
     
-    std::vector<std::shared_ptr<Characteristic>> characteristics_;
+    std::vector<std::unique_ptr<Characteristic>> characteristics_;
     std::vector<uint64_t> linked_services_;
 };
 
