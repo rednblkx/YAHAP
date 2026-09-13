@@ -210,7 +210,13 @@ void BleTransport::add_pairing_characteristic(
     if (user_description) {
         meta.user_description = user_description;
     }
-    pairing_char_metadata_[char_iid] = meta;
+    for (auto& existing : pairing_char_metadata_) {
+        if (existing.instance_id == char_iid) {
+            existing = meta;
+            return;
+        }
+    }
+    pairing_char_metadata_.push_back(meta);
 
     HAP_LOG_INFO(config_.system, "[BleTransport] Registered characteristic ", uuid, " IID=", char_iid);
     svc.characteristics.push_back(std::move(def));
@@ -635,7 +641,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         bool found = false;
         std::vector<uint16_t> linked_services;
 
-        for (const auto& [cid, meta] : pairing_char_metadata_) {
+        for (const auto& meta : pairing_char_metadata_) {
             if (meta.service_id == iid) {
                 is_primary = true;
                 found = true;
@@ -722,12 +728,15 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         std::vector<uint8_t> value_bytes;
         uint8_t status = 0x00;
         
-        auto meta_it = pairing_char_metadata_.find(iid);
-        if (meta_it != pairing_char_metadata_.end()) {
-            if (meta_it->second.char_type == 0x4F) { // Pairing Features
+        const CharacteristicMetadata* meta_it = nullptr;
+        for (const auto& m : pairing_char_metadata_) {
+            if (m.instance_id == iid) { meta_it = &m; break; }
+        }
+        if (meta_it) {
+            if (meta_it->char_type == 0x4F) { // Pairing Features
                 value_bytes = {0x01, 0x01, 0x00};
                 HAP_LOG_INFO(config_.system, "[BleTransport] Pairing Features Read: returning 0x00");
-            } else if (meta_it->second.char_type == 0x37) { // Version
+            } else if (meta_it->char_type == 0x37) { // Version
                 // HAP Spec 7.4.4.5.2: Version characteristic returns protocol version string
                 // Format: "major.minor.revision" e.g., "1.1.0"
                 // Per HAP spec, current version for BLE is 1.1.0
@@ -766,9 +775,12 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         uint8_t status = 0x00;
         std::vector<uint8_t> response_body;
 
-        auto meta_it = pairing_char_metadata_.find(iid);
-        if (meta_it != pairing_char_metadata_.end()) {
-             uint8_t type = meta_it->second.char_type;
+        const CharacteristicMetadata* meta_it = nullptr;
+        for (const auto& m : pairing_char_metadata_) {
+            if (m.instance_id == iid) { meta_it = &m; break; }
+        }
+        if (meta_it) {
+             uint8_t type = meta_it->char_type;
              
              auto& session = session_manager_->get_or_create(connection_id);
              if (!session.context) {
@@ -937,9 +949,12 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         } else {
             HAP_LOG_INFO(config_.system, "[BleTransport] Executing pending timed write for IID=", state.timed_write_iid);
             
-            auto meta_it = pairing_char_metadata_.find(state.timed_write_iid);
-            if (meta_it != pairing_char_metadata_.end()) {
-                uint8_t type = meta_it->second.char_type;
+            const CharacteristicMetadata* meta_it = nullptr;
+            for (const auto& m : pairing_char_metadata_) {
+                if (m.instance_id == state.timed_write_iid) { meta_it = &m; break; }
+            }
+            if (meta_it) {
+                uint8_t type = meta_it->char_type;
                 
                 auto& session = session_manager_->get_or_create(connection_id);
                 if (!session.context) {
@@ -1085,7 +1100,17 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         // Store broadcast configuration for this characteristic
         // HAP Table 7-29 (7.3.4.14): bit 0x0001 = Enable Broadcast Notification
         bool broadcast_enabled = (properties & 0x0001) != 0;
-        broadcast_configs_[iid] = BroadcastConfig{iid, broadcast_interval, broadcast_enabled};
+        bool found_bc = false;
+        for (auto& bc : broadcast_configs_) {
+            if (bc.iid == iid) {
+                bc = BroadcastConfig{iid, broadcast_interval, broadcast_enabled};
+                found_bc = true;
+                break;
+            }
+        }
+        if (!found_bc) {
+            broadcast_configs_.push_back(BroadcastConfig{iid, broadcast_interval, broadcast_enabled});
+        }
         
         HAP_LOG_INFO(config_.system, "[BleTransport] Characteristic Configuration IID=", iid, " Props=", properties, " Interval=", broadcast_interval, " BroadcastEnabled=", broadcast_enabled);
         
@@ -1218,8 +1243,12 @@ std::vector<uint8_t> BleTransport::process_signature_read(uint16_t connection_id
     (void)connection_id;
     std::vector<uint8_t> response;
     
-    if (pairing_char_metadata_.count(char_iid)) {
-        const auto& meta = pairing_char_metadata_[char_iid];
+    const CharacteristicMetadata* pairing_meta = nullptr;
+    for (const auto& m : pairing_char_metadata_) {
+        if (m.instance_id == char_iid) { pairing_meta = &m; break; }
+    }
+    if (pairing_meta) {
+        const auto& meta = *pairing_meta;
         
         {
             BleTlvBuilder builder;
@@ -1396,7 +1425,20 @@ void BleTransport::register_services_by_type(uint16_t filter_type) {
                 platform::Ble::CharacteristicDefinition cdef;
                 cdef.uuid = char_uuid;
                 
-                instance_map_[{acc->aid(), ch->iid()}] = static_cast<uint16_t>(ch->type() & 0xFFFF);
+                {
+                    std::pair<uint64_t, uint64_t> key{acc->aid(), ch->iid()};
+                    bool found_instance = false;
+                    for (auto& entry : instance_map_) {
+                        if (entry.first == key) {
+                            entry.second = static_cast<uint16_t>(ch->type() & 0xFFFF);
+                            found_instance = true;
+                            break;
+                        }
+                    }
+                    if (!found_instance) {
+                        instance_map_.emplace_back(key, static_cast<uint16_t>(ch->type() & 0xFFFF));
+                    }
+                }
                 
                 auto perms = ch->permissions();
                 cdef.properties.read = true;
@@ -1513,17 +1555,24 @@ void BleTransport::handle_characteristic_change(uint64_t aid, uint64_t iid,
     }
     
     bool broadcast_enabled = false;
-    if (broadcast_configs_.count(static_cast<uint16_t>(iid))) {
-        auto& bc = broadcast_configs_[static_cast<uint16_t>(iid)];
-        broadcast_enabled = bc.enabled;
+    for (const auto& bc : broadcast_configs_) {
+        if (bc.iid == static_cast<uint16_t>(iid)) {
+            broadcast_enabled = bc.enabled;
+            break;
+        }
     }
     
-    auto it = instance_map_.find({aid, iid});
-    if (it == instance_map_.end()) {
+    uint16_t char_type = 0;
+    for (const auto& entry : instance_map_) {
+        if (entry.first == std::pair<uint64_t, uint64_t>{aid, iid}) {
+            char_type = entry.second;
+            break;
+        }
+    }
+    if (char_type == 0) {
         HAP_LOG_WARN(config_.system, "[BleTransport] No UUID mapping for IID=", iid);
         return;
     }
-    uint16_t char_type = it->second;
     
     // exclude_conn_id == kNoConnectionExclusion (0) means "notify everyone";
     // otherwise skip the connection that caused the change. Note BLE connection
@@ -1563,9 +1612,9 @@ void BleTransport::send_connected_event(uint16_t iid) {
     // Send a ZERO-LENGTH indication to controllers that registered for indications.
     
     uint16_t char_type = 0;
-    for (const auto& [key, val] : instance_map_) {
-        if (key.second == iid) {
-            char_type = val;
+    for (const auto& entry : instance_map_) {
+        if (entry.first.second == iid) {
+            char_type = entry.second;
             break;
         }
     }
@@ -1614,12 +1663,15 @@ void BleTransport::send_broadcasted_event(uint16_t iid, const core::Value& value
     (void)parse_device_id(config_.accessory_id, adv_id);
     
     uint32_t interval_ms = 20;  // Default 20ms
-    if (broadcast_configs_.count(iid)) {
-        switch (broadcast_configs_[iid].interval) {
-            case 0x01: interval_ms = 20; break;
-            case 0x02: interval_ms = 1280; break;
-            case 0x03: interval_ms = 2560; break;
-            default: interval_ms = 20; break;
+    for (const auto& bc : broadcast_configs_) {
+        if (bc.iid == iid) {
+            switch (bc.interval) {
+                case 0x01: interval_ms = 20; break;
+                case 0x02: interval_ms = 1280; break;
+                case 0x03: interval_ms = 2560; break;
+                default: interval_ms = 20; break;
+            }
+            break;
         }
     }
     

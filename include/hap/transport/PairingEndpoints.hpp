@@ -10,7 +10,8 @@
 #include "hap/platform/CryptoSRP.hpp"
 #include <string>
 #include <array>
-#include <map>
+#include <vector>
+#include <utility>
 #include <functional>
 
 namespace hap::transport {
@@ -70,11 +71,32 @@ public:
 private:
     Config config_;
     
-    // Per-connection pairing state
-    std::map<uint32_t, std::unique_ptr<pairing::PairSetup>> pair_setup_sessions_;
-    std::map<uint32_t, std::unique_ptr<pairing::PairVerify>> pair_verify_sessions_;
+    // Per-connection pairing state. Session counts are tiny (a handful of
+    // concurrent connections), so flat vectors beat std::map on code size.
+    template<typename T>
+    using SessionMap = std::vector<std::pair<uint32_t, std::unique_ptr<T>>>;
+    SessionMap<pairing::PairSetup> pair_setup_sessions_;
+    SessionMap<pairing::PairVerify> pair_verify_sessions_;
     // Connections whose pair-verify succeeded and await the post-response upgrade.
-    std::map<uint32_t, std::unique_ptr<pairing::PairVerify>> pending_verify_upgrades_;
+    SessionMap<pairing::PairVerify> pending_verify_upgrades_;
+
+    template<typename T>
+    static std::unique_ptr<T>* find_session(SessionMap<T>& map, uint32_t connection_id) {
+        for (auto& [id, session] : map) {
+            if (id == connection_id) return &session;
+        }
+        return nullptr;
+    }
+
+    template<typename T>
+    static void erase_session(SessionMap<T>& map, uint32_t connection_id) {
+        for (auto it = map.begin(); it != map.end(); ++it) {
+            if (it->first == connection_id) {
+                map.erase(it);
+                return;
+            }
+        }
+    }
 };
 
 } // namespace hap::transport

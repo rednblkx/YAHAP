@@ -130,9 +130,9 @@ bool HTTPParser::parse_headers() {
         if (line.empty()) {
             // End of headers
             // Check for Content-Length
-            auto content_length_it = current_request_.headers.find("Content-Length");
-            if (content_length_it != current_request_.headers.end()) {
-                const std::string& cl = content_length_it->second;
+            const std::string* cl_ptr = find_header(current_request_.headers, "Content-Length");
+            if (cl_ptr) {
+                const std::string& cl = *cl_ptr;
                 size_t content_length = 0;
                 auto [ptr, ec] = std::from_chars(cl.data(), cl.data() + cl.size(), content_length);
                 if (ec != std::errc() || ptr != cl.data() + cl.size() ||
@@ -157,7 +157,7 @@ bool HTTPParser::parse_headers() {
             std::string value = line.substr(colon + 1);
             // Trim whitespace from value
             value.erase(0, value.find_first_not_of(" \t"));
-            current_request_.headers[key] = value;
+            set_header(current_request_.headers, std::move(key), std::move(value));
         }
     }
 }

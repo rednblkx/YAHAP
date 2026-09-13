@@ -1,7 +1,7 @@
 #include "hap/transport/PairingEndpoints.hpp"
+#include <algorithm>
 #include "hap/common/Log.hpp"
 #include "hap/common/JsonValue.hpp"
-#include <algorithm>
 
 namespace hap::transport {
 
@@ -20,7 +20,18 @@ Response PairingEndpoints::handle_pair_setup(const Request& req, ConnectionConte
     // Get or create session
     // For BLE: always create a new session on M1 to handle reconnection properly
     // (BLE reconnects with same connection_id=0, so old completed session would be reused)
-    auto& session = pair_setup_sessions_[ctx.connection_id()];
+    auto* session_slot = find_session(pair_setup_sessions_, ctx.connection_id());
+    if (is_m1 && session_slot) {
+        // BLE reconnects with the same connection_id=0: a fresh M1 must start
+        // a clean session instead of reusing the completed one.
+        erase_session(pair_setup_sessions_, ctx.connection_id());
+        session_slot = nullptr;
+    }
+    if (!session_slot) {
+        pair_setup_sessions_.emplace_back(ctx.connection_id(), nullptr);
+        session_slot = &pair_setup_sessions_.back().second;
+    }
+    auto& session = *session_slot;
     if (!session || is_m1) {
         HAP_LOG_INFO(config_.system, "[PairingEndpoints] Creating new pair-setup session");
         pairing::PairSetup::Config setup_config;
@@ -62,7 +73,16 @@ Response PairingEndpoints::handle_pair_verify(const Request& req, ConnectionCont
     // Get or create session
     // For BLE: always create a new session on M1 to handle reconnection properly
     // (BLE reconnects with same connection_id=0, so old verified session would be reused)
-    auto& session = pair_verify_sessions_[ctx.connection_id()];
+    auto* session_slot = find_session(pair_verify_sessions_, ctx.connection_id());
+    if (is_m1 && session_slot) {
+        erase_session(pair_verify_sessions_, ctx.connection_id());
+        session_slot = nullptr;
+    }
+    if (!session_slot) {
+        pair_verify_sessions_.emplace_back(ctx.connection_id(), nullptr);
+        session_slot = &pair_verify_sessions_.back().second;
+    }
+    auto& session = *session_slot;
     if (!session || is_m1) {
         HAP_LOG_INFO(config_.system, "[PairingEndpoints] Creating new pair-verify session");
         pairing::PairVerify::Config verify_config;
@@ -85,8 +105,8 @@ Response PairingEndpoints::handle_pair_verify(const Request& req, ConnectionCont
             // Defer the upgrade until the M4 response has been sent: the M4
             // response itself must travel in cleartext (HAP session security
             // starts only after Pair Verify completes).
-            pending_verify_upgrades_[ctx.connection_id()] = std::move(session);
-            pair_verify_sessions_.erase(ctx.connection_id());
+            pending_verify_upgrades_.emplace_back(ctx.connection_id(), std::move(session));
+            erase_session(pair_verify_sessions_, ctx.connection_id());
             HAP_LOG_INFO(config_.system, "[PairingEndpoints] Pair-verify succeeded - upgrade pending until response is sent");
         } else {
             HAP_LOG(config_.system, "[PairingEndpoints] Pair-verify response sent (", static_cast<uint64_t>(response_tlv->size()), " bytes)");
@@ -101,11 +121,11 @@ Response PairingEndpoints::handle_pair_verify(const Request& req, ConnectionCont
 }
 
 void PairingEndpoints::complete_pair_verify(ConnectionContext& ctx) {
-    auto it = pending_verify_upgrades_.find(ctx.connection_id());
-    if (it == pending_verify_upgrades_.end()) {
+    auto* slot = find_session(pending_verify_upgrades_, ctx.connection_id());
+    if (!slot || !*slot) {
         return;
     }
-    auto& session = it->second;
+    auto& session = *slot;
     if (session->is_verified()) {
         HAP_LOG_INFO(config_.system, "[PairingEndpoints] Upgrading connection to encrypted after M4 response");
         ctx.upgrade_to_secure(
@@ -113,7 +133,7 @@ void PairingEndpoints::complete_pair_verify(ConnectionContext& ctx) {
             session->get_shared_secret(),
             session->get_controller_id());
     }
-    pending_verify_upgrades_.erase(it);
+    erase_session(pending_verify_upgrades_, ctx.connection_id());
 }
 
 Response PairingEndpoints::handle_pairings(const Request& req, ConnectionContext& ctx) {

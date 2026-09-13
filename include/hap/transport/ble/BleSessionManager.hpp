@@ -4,7 +4,6 @@
 #include "hap/transport/ConnectionContext.hpp"
 #include "hap/platform/System.hpp"
 #include <cstdint>
-#include <map>
 #include <memory>
 #include <vector>
 
@@ -119,8 +118,10 @@ public:
 
 private:
     platform::System* system_;
-    std::map<uint16_t, BleSession> sessions_;
-    std::map<uint16_t, std::vector<uint16_t>> subscriptions_;
+    // HAP-BLE serves a handful of concurrent connections; flat vectors beat
+    // std::map on code size and allocation count at this scale.
+    std::vector<BleSession> sessions_;
+    std::vector<std::pair<uint16_t, std::vector<uint16_t>>> subscriptions_;
     
     static constexpr uint64_t kIdleTimeoutMs = 30000;      // 30 seconds
     static constexpr uint64_t kProcedureTimeoutMs = 10000; // 10 seconds

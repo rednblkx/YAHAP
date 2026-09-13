@@ -10,26 +10,34 @@ BleSessionManager::BleSessionManager(platform::System* system)
     : system_(system) {}
 
 BleSession& BleSessionManager::get_or_create(uint16_t connection_id) {
-    auto it = sessions_.find(connection_id);
-    if (it == sessions_.end()) {
-        auto [iter, _] = sessions_.emplace(connection_id, BleSession{connection_id});
-        return iter->second;
+    for (auto& session : sessions_) {
+        if (session.connection_id == connection_id) return session;
     }
-    return it->second;
+    sessions_.emplace_back(connection_id);
+    return sessions_.back();
 }
 
 BleSession* BleSessionManager::get_session(uint16_t connection_id) {
-    auto it = sessions_.find(connection_id);
-    return it != sessions_.end() ? &it->second : nullptr;
+    for (auto& session : sessions_) {
+        if (session.connection_id == connection_id) return &session;
+    }
+    return nullptr;
 }
 
 const BleSession* BleSessionManager::get_session(uint16_t connection_id) const {
-    auto it = sessions_.find(connection_id);
-    return it != sessions_.end() ? &it->second : nullptr;
+    for (const auto& session : sessions_) {
+        if (session.connection_id == connection_id) return &session;
+    }
+    return nullptr;
 }
 
 void BleSessionManager::remove(uint16_t connection_id) {
-    sessions_.erase(connection_id);
+    for (auto it = sessions_.begin(); it != sessions_.end(); ++it) {
+        if (it->connection_id == connection_id) {
+            sessions_.erase(it);
+            break;
+        }
+    }
     
     // Remove from all subscriptions
     for (auto& [uuid, subscribers] : subscriptions_) {
@@ -49,7 +57,7 @@ std::vector<uint16_t> BleSessionManager::check_timeouts() {
     
     uint64_t current_time = system_->millis();
     
-    for (auto& [conn_id, session] : sessions_) {
+    for (auto& session : sessions_) {
         auto& state = session.transaction;
         
         if (state.connection_established_ms > 0 && 
@@ -57,8 +65,8 @@ std::vector<uint16_t> BleSessionManager::check_timeouts() {
             state.last_activity_ms == 0) {
             uint64_t time_since_connect = current_time - state.connection_established_ms;
             if (time_since_connect > kInitialTimeoutMs) {
-                HAP_LOG_WARN(system_, "[BleSessionManager] Initial procedure timeout for connection ", conn_id);
-                timed_out.push_back(conn_id);
+                HAP_LOG_WARN(system_, "[BleSessionManager] Initial procedure timeout for connection ", session.connection_id);
+                timed_out.push_back(session.connection_id);
                 continue;
             }
         }
@@ -67,8 +75,8 @@ std::vector<uint16_t> BleSessionManager::check_timeouts() {
         if (state.active && state.procedure_start_ms > 0) {
             uint64_t procedure_duration = current_time - state.procedure_start_ms;
             if (procedure_duration > kProcedureTimeoutMs) {
-                HAP_LOG_WARN(system_, "[BleSessionManager] Procedure timeout for connection ", conn_id);
-                timed_out.push_back(conn_id);
+                HAP_LOG_WARN(system_, "[BleSessionManager] Procedure timeout for connection ", session.connection_id);
+                timed_out.push_back(session.connection_id);
                 continue;
             }
         }
@@ -77,8 +85,8 @@ std::vector<uint16_t> BleSessionManager::check_timeouts() {
         if (state.last_activity_ms > 0) {
             uint64_t idle_duration = current_time - state.last_activity_ms;
             if (idle_duration > kIdleTimeoutMs) {
-                HAP_LOG_INFO(system_, "[BleSessionManager] Idle timeout for connection ", conn_id);
-                timed_out.push_back(conn_id);
+                HAP_LOG_INFO(system_, "[BleSessionManager] Idle timeout for connection ", session.connection_id);
+                timed_out.push_back(session.connection_id);
             }
         }
     }
@@ -87,31 +95,40 @@ std::vector<uint16_t> BleSessionManager::check_timeouts() {
 }
 
 void BleSessionManager::add_subscription(uint16_t char_type, uint16_t connection_id) {
-    auto& subscribers = subscriptions_[char_type];
-    if (std::find(subscribers.begin(), subscribers.end(), connection_id) == subscribers.end()) {
-        subscribers.push_back(connection_id);
+    for (auto& [type, subscribers] : subscriptions_) {
+        if (type == char_type) {
+            if (std::find(subscribers.begin(), subscribers.end(), connection_id) == subscribers.end()) {
+                subscribers.push_back(connection_id);
+            }
+            return;
+        }
     }
+    subscriptions_.emplace_back(char_type, std::vector<uint16_t>{connection_id});
 }
 
 void BleSessionManager::remove_subscription(uint16_t char_type, uint16_t connection_id) {
-    auto it = subscriptions_.find(char_type);
-    if (it != subscriptions_.end()) {
-        auto& subscribers = it->second;
-        subscribers.erase(
-            std::remove(subscribers.begin(), subscribers.end(), connection_id),
-            subscribers.end()
-        );
+    for (auto& [type, subscribers] : subscriptions_) {
+        if (type == char_type) {
+            subscribers.erase(
+                std::remove(subscribers.begin(), subscribers.end(), connection_id),
+                subscribers.end());
+            return;
+        }
     }
 }
 
 const std::vector<uint16_t>& BleSessionManager::get_subscribers(uint16_t char_type) const {
-    auto it = subscriptions_.find(char_type);
-    return it != subscriptions_.end() ? it->second : kEmptySubscribers;
+    for (const auto& [type, subscribers] : subscriptions_) {
+        if (type == char_type) return subscribers;
+    }
+    return kEmptySubscribers;
 }
 
 bool BleSessionManager::has_subscribers(uint16_t char_type) const {
-    auto it = subscriptions_.find(char_type);
-    return it != subscriptions_.end() && !it->second.empty();
+    for (const auto& [type, subscribers] : subscriptions_) {
+        if (type == char_type) return !subscribers.empty();
+    }
+    return false;
 }
 
 } // namespace hap::transport::ble

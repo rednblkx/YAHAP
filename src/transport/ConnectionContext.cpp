@@ -16,15 +16,26 @@ void ConnectionContext::upgrade_to_secure(
 }
 
 void ConnectionContext::add_subscription(uint64_t aid, uint64_t iid) {
-    subscriptions_.insert({aid, iid});
+    for (const auto& sub : subscriptions_) {
+        if (sub.first == aid && sub.second == iid) return;
+    }
+    subscriptions_.emplace_back(aid, iid);
 }
 
 void ConnectionContext::remove_subscription(uint64_t aid, uint64_t iid) {
-    subscriptions_.erase({aid, iid});
+    for (auto it = subscriptions_.begin(); it != subscriptions_.end(); ++it) {
+        if (it->first == aid && it->second == iid) {
+            subscriptions_.erase(it);
+            return;
+        }
+    }
 }
 
 bool ConnectionContext::has_subscription(uint64_t aid, uint64_t iid) const {
-    return subscriptions_.find({aid, iid}) != subscriptions_.end();
+    for (const auto& sub : subscriptions_) {
+        if (sub.first == aid && sub.second == iid) return true;
+    }
+    return false;
 }
 
 void ConnectionContext::prepare_timed_write(uint64_t pid, uint64_t ttl) {

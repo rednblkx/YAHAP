@@ -47,8 +47,35 @@ public:
     std::unique_ptr<transport::PairingEndpoints> pairing_endpoints;
     std::unique_ptr<transport::BleTransport> ble_transport;
     std::unique_ptr<transport::AccessoryEndpoints> accessory_endpoints;
-    std::map<uint32_t, std::unique_ptr<transport::ConnectionContext>> connections;
-    std::map<uint32_t, transport::HTTPParser> parsers;
+    // HAP over IP serves a few connections at most; flat vectors keep the
+    // per-connection bookkeeping allocation-free apart from the entries.
+    std::vector<std::pair<uint32_t, std::unique_ptr<transport::ConnectionContext>>> connections;
+    std::vector<std::pair<uint32_t, transport::HTTPParser>> parsers;
+
+    std::unique_ptr<transport::ConnectionContext>& connection(uint32_t connection_id) {
+        for (auto& [id, ctx] : connections) {
+            if (id == connection_id) return ctx;
+        }
+        connections.emplace_back(connection_id, nullptr);
+        return connections.back().second;
+    }
+
+    transport::HTTPParser& parser(uint32_t connection_id) {
+        for (auto& [id, parser] : parsers) {
+            if (id == connection_id) return parser;
+        }
+        parsers.emplace_back(connection_id, transport::HTTPParser{});
+        return parsers.back().second;
+    }
+
+    void erase_connection(uint32_t connection_id) {
+        for (auto it = connections.begin(); it != connections.end(); ++it) {
+            if (it->first == connection_id) { connections.erase(it); return; }
+        }
+        for (auto it = parsers.begin(); it != parsers.end(); ++it) {
+            if (it->first == connection_id) { parsers.erase(it); return; }
+        }
+    }
 };
 
 AccessoryServer::AccessoryServer(Config config) : config_(std::move(config)), impl_(std::make_unique<Impl>()) {
@@ -434,14 +461,14 @@ void AccessoryServer::on_tcp_receive(uint32_t connection_id, std::span<const uin
         "[AccessoryServer] Received ", static_cast<uint64_t>(data.size()), " bytes from connection ", connection_id);
 
     // Get or create connection context
-    auto& ctx = impl_->connections[connection_id];
+    std::unique_ptr<transport::ConnectionContext>& ctx = impl_->connection(connection_id);
     if (!ctx) {
         HAP_LOG_INFO(config_.system, "[AccessoryServer] New connection #", connection_id);
         ctx = std::make_unique<transport::ConnectionContext>(config_.crypto, config_.system, connection_id);
     }
 
     // Get or create HTTP parser
-    auto& parser = impl_->parsers[connection_id];
+    transport::HTTPParser& parser = impl_->parser(connection_id);
 
     // Decrypt if connection is encrypted
     std::vector<uint8_t> plaintext_data;
@@ -499,8 +526,8 @@ void AccessoryServer::on_tcp_receive(uint32_t connection_id, std::span<const uin
                 HAP_LOG(config_.system, "[AccessoryServer] Response Header: ", header.first, ": ", header.second);
             }
             if (!final_response.body.empty()) {
-                auto it = final_response.headers.find("Content-Type");
-                std::string content_type = (it != final_response.headers.end()) ? it->second : "";
+                const std::string* ct_ptr = transport::find_header(final_response.headers, "Content-Type");
+                std::string content_type = ct_ptr ? *ct_ptr : "";
 
                 if (content_type == "application/pairing+tlv8") {
                     HAP_LOG(config_.system, "[AccessoryServer] Response Body (TLV8): ",
@@ -559,8 +586,7 @@ void AccessoryServer::on_tcp_receive(uint32_t connection_id, std::span<const uin
 
 void AccessoryServer::on_tcp_disconnect(uint32_t connection_id) {
     HAP_LOG_INFO(config_.system, "[AccessoryServer] Connection #", connection_id, " disconnected");
-    impl_->connections.erase(connection_id);
-    impl_->parsers.erase(connection_id);
+    impl_->erase_connection(connection_id);
 }
 
 void AccessoryServer::broadcast_event(uint64_t aid, uint64_t iid, const core::Value& value, uint32_t exclude_conn_id) {

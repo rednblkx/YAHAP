@@ -1,8 +1,9 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <vector>
-#include <map>
+#include <utility>
 #include <span>
 #include <cstdint>
 
@@ -29,7 +30,27 @@ enum class Status {
     ServiceUnavailable = 503
 };
 
-using Headers = std::map<std::string, std::string>;
+// HTTP messages carry a handful of headers, so a flat vector beats a
+// std::map on code size, allocation count and cache behavior. Lookup is a
+// linear scan and keys keep insertion order in the serialized response.
+using Headers = std::vector<std::pair<std::string, std::string>>;
+
+inline const std::string* find_header(const Headers& headers, std::string_view key) {
+    for (const auto& [k, v] : headers) {
+        if (k == key) return &v;
+    }
+    return nullptr;
+}
+
+inline void set_header(Headers& headers, std::string key, std::string value) {
+    for (auto& [k, v] : headers) {
+        if (k == key) {
+            v = std::move(value);
+            return;
+        }
+    }
+    headers.emplace_back(std::move(key), std::move(value));
+}
 
 struct Request {
     Method method;
@@ -37,9 +58,9 @@ struct Request {
     Headers headers;
     std::vector<uint8_t> body;
 
-    std::string get_header(const std::string& key) const {
-        auto it = headers.find(key);
-        return it != headers.end() ? it->second : "";
+    std::string get_header(std::string_view key) const {
+        const std::string* v = find_header(headers, key);
+        return v ? *v : "";
     }
 };
 
@@ -50,18 +71,18 @@ struct Response {
 
     Response(Status s = Status::OK) : status(s) {}
 
-    void set_header(const std::string& key, const std::string& value) {
-        headers[key] = value;
+    void set_header(std::string key, std::string value) {
+        transport::set_header(headers, std::move(key), std::move(value));
     }
 
     void set_body(std::vector<uint8_t> b) {
         body = std::move(b);
-        headers["Content-Length"] = std::to_string(body.size());
+        set_header("Content-Length", std::to_string(body.size()));
     }
 
     void set_body(std::string_view text) {
         body.assign(text.begin(), text.end());
-        headers["Content-Length"] = std::to_string(body.size());
+        set_header("Content-Length", std::to_string(body.size()));
     }
 };
 

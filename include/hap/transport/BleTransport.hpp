@@ -8,7 +8,6 @@
 #include "hap/transport/ble/BleSessionManager.hpp"
 #include <memory>
 #include <optional>
-#include <map>
 #include <vector>
 #include <array>
 
@@ -109,7 +108,8 @@ private:
     std::unique_ptr<ble::BleSessionManager> session_manager_;
 
     // Mapping (AID, IID) -> Characteristic UUID
-    std::map<std::pair<uint64_t, uint64_t>, uint16_t> instance_map_;  // (aid, iid) -> short char type
+    // (aid, iid) -> short char type for all registered HAP-BLE characteristics
+    std::vector<std::pair<std::pair<uint64_t, uint64_t>, uint16_t>> instance_map_;
     
     struct CharacteristicMetadata {
         uint16_t instance_id;     // Characteristic IID
@@ -119,14 +119,16 @@ private:
         uint16_t properties;      // HAP characteristic properties bitmask
         std::string user_description; // Optional GATT User Description
     };
-    std::map<uint16_t, CharacteristicMetadata> pairing_char_metadata_;
+    // Flat vectors: the pairing service has ~7 fixed characteristics and
+    // broadcast configs are rare, so linear scan beats std::map overhead.
+    std::vector<CharacteristicMetadata> pairing_char_metadata_;
 
     struct BroadcastConfig {
         uint16_t iid = 0;
         uint8_t interval = 0x01;  // 0x01=20ms, 0x02=1280ms, 0x03=2560ms
         bool enabled = false;
     };
-    std::map<uint16_t, BroadcastConfig> broadcast_configs_;
+    std::vector<BroadcastConfig> broadcast_configs_;
     
     std::vector<uint8_t> last_adv_payload_;
     std::optional<std::string> last_adv_name_;

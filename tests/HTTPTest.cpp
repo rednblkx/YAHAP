@@ -128,7 +128,7 @@ void test_base64_alphabet_decode() {
     hap::transport::Request req;
     req.method = Method::PUT;
     req.path = "/characteristics";
-    req.headers["Content-Type"] = "application/hap+json";
+    hap::transport::set_header(req.headers, "Content-Type", "application/hap+json");
     req.body.assign(body.begin(), body.end());
 
     hap::transport::ConnectionContext ctx(&crypto, &system, 1);

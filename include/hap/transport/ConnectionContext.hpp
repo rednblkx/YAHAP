@@ -4,7 +4,7 @@
 #include "hap/platform/System.hpp"
 #include <memory>
 #include <optional>
-#include <set>
+#include <vector>
 #include <utility>
 
 namespace hap::transport {
@@ -77,8 +77,9 @@ private:
     std::array<uint8_t, 32> session_shared_secret_ = {};
     bool should_close_ = false;
     
-    // Subscriptions (AID, IID)
-    std::set<std::pair<uint64_t, uint64_t>> subscriptions_;
+    // Subscriptions (AID, IID) — a controller subscribes to a handful of
+    // characteristics, so a flat vector beats a tree on code size and cache.
+    std::vector<std::pair<uint64_t, uint64_t>> subscriptions_;
     
     // Timed Write Transaction
     struct TimedWriteTransaction {
