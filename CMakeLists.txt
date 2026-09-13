@@ -31,14 +31,9 @@ set(YAHAP_SOURCES
     src/transport/HTTP.cpp
     src/transport/SecureSession.cpp
     src/transport/Router.cpp
-    src/platform/Ble.cpp
-    src/transport/BleTransport.cpp
     src/transport/ConnectionContext.cpp
     src/transport/PairingEndpoints.cpp
     src/transport/AccessoryEndpoints.cpp
-    src/transport/ble/HapPdu.cpp
-    src/transport/ble/BleTlvBuilder.cpp
-    src/transport/ble/BleSessionManager.cpp
     src/pairing/PairingKeys.cpp
     src/pairing/PairSetup.cpp
     src/pairing/PairVerify.cpp
@@ -46,11 +41,27 @@ set(YAHAP_SOURCES
     src/types/ServiceTypes.cpp
 )
 
+# BLE transport sources: compiled only when YAHAP_BLE is enabled. AccessoryServer
+# gates its BleTransport member/usage on HAP_ENABLE_BLE (defined below), so with
+# BLE off nothing references these objects and they never enter the link.
+set(YAHAP_BLE_SOURCES
+    src/platform/Ble.cpp
+    src/transport/BleTransport.cpp
+    src/transport/ble/HapPdu.cpp
+    src/transport/ble/BleTlvBuilder.cpp
+    src/transport/ble/BleSessionManager.cpp
+)
+
 # Compile-time log level: 0=Debug 1=Info 2=Warning 3=Error. Messages below the
 # level vanish at compile time (format strings, std::string building and all).
 # Default Info keeps pairing/bootstrap visibility; set 0 when debugging.
 # Declared before the ESP-IDF branch so both build modes see it.
 set(YAHAP_LOG_LEVEL "1" CACHE STRING "HAP log level: 0=Debug 1=Info 2=Warning 3=Error")
+
+# HAP over BLE support. OFF compiles the BLE transport out of the library
+# entirely (BleTransport, HapPdu, BleTlvBuilder, BleSessionManager, platform
+# Ble shim)
+set(YAHAP_BLE "ON" CACHE STRING "Build HAP over BLE transport (ON/OFF)")
 
 set(YAHAP_EMBEDDED_CXX_FLAGS
     -fno-exceptions -fno-rtti
@@ -60,11 +71,18 @@ set(YAHAP_EMBEDDED_CXX_FLAGS
 
 if(ESP_PLATFORM)
     # Mode 2: proper ESP-IDF component.
+    set(YAHAP_ALL_SOURCES ${YAHAP_SOURCES})
+    if(YAHAP_BLE)
+        list(APPEND YAHAP_ALL_SOURCES ${YAHAP_BLE_SOURCES})
+    endif()
     idf_component_register(
-        SRCS ${YAHAP_SOURCES}
+        SRCS ${YAHAP_ALL_SOURCES}
         INCLUDE_DIRS include
     )
     target_compile_definitions(${COMPONENT_LIB} PUBLIC HAP_LOG_LEVEL=${YAHAP_LOG_LEVEL})
+    if(YAHAP_BLE)
+        target_compile_definitions(${COMPONENT_LIB} PUBLIC HAP_ENABLE_BLE=1)
+    endif()
     target_compile_options(${COMPONENT_LIB} PUBLIC ${YAHAP_EMBEDDED_CXX_FLAGS})
     return()
 endif()
@@ -74,6 +92,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_library(hap)
 target_sources(hap PRIVATE ${YAHAP_SOURCES})
+if(YAHAP_BLE)
+    target_sources(hap PRIVATE ${YAHAP_BLE_SOURCES})
+endif()
 
 target_include_directories(hap PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -92,6 +113,9 @@ endif()
 # Compile-time log level for the native build (the value is declared above the
 # ESP-IDF branch so both modes share it).
 target_compile_definitions(hap PUBLIC HAP_LOG_LEVEL=${YAHAP_LOG_LEVEL})
+if(YAHAP_BLE)
+    target_compile_definitions(hap PUBLIC HAP_ENABLE_BLE=1)
+endif()
 
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     include(CTest)

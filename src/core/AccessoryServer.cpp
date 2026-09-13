@@ -3,7 +3,9 @@
 #include "hap/common/TaskScheduler.hpp"
 #include "hap/common/Log.hpp"
 #include "hap/transport/Router.hpp"
+#ifdef HAP_ENABLE_BLE
 #include "hap/transport/BleTransport.hpp"
+#endif
 #include "hap/transport/ConnectionContext.hpp"
 #include "hap/transport/PairingEndpoints.hpp"
 #include "hap/transport/AccessoryEndpoints.hpp"
@@ -45,7 +47,9 @@ class AccessoryServer::Impl {
 public:
     std::unique_ptr<transport::Router> router;
     std::unique_ptr<transport::PairingEndpoints> pairing_endpoints;
+#ifdef HAP_ENABLE_BLE
     std::unique_ptr<transport::BleTransport> ble_transport;
+#endif
     std::unique_ptr<transport::AccessoryEndpoints> accessory_endpoints;
     // HAP over IP serves a few connections at most; flat vectors keep the
     // per-connection bookkeeping allocation-free apart from the entries.
@@ -120,9 +124,11 @@ AccessoryServer::AccessoryServer(Config config) : config_(std::move(config)), im
         }
         
         update_mdns();
+#ifdef HAP_ENABLE_BLE
         if (impl_->ble_transport) {
             impl_->ble_transport->update_advertising();
         }
+#endif
         
         // Invoke user callback if set
         if (config_.on_pairings_changed) {
@@ -141,7 +147,8 @@ AccessoryServer::AccessoryServer(Config config) : config_(std::move(config)), im
     
     // Initialize task scheduler first (needed by BleTransport)
     scheduler_ = std::make_unique<common::TaskScheduler>(config_.system);
-    
+
+#ifdef HAP_ENABLE_BLE
     if (config_.ble) {
         transport::BleTransport::Config ble_config;
         ble_config.ble = config_.ble;
@@ -161,6 +168,7 @@ AccessoryServer::AccessoryServer(Config config) : config_(std::move(config)), im
             impl_->ble_transport->check_session_timeouts();
         });
     }
+#endif
     
     impl_->accessory_endpoints = std::make_unique<transport::AccessoryEndpoints>(&database_);
     
@@ -310,14 +318,16 @@ void AccessoryServer::start() {
     
     if (config_.network) {
         config_.network->tcp_listen(config_.port, receive_cb, disconnect_cb);
-        
+
         // Register mDNS service
         update_mdns();
     }
-    
+
+#ifdef HAP_ENABLE_BLE
     if (impl_->ble_transport) {
         impl_->ble_transport->start();
     }
+#endif
 }
 
 void AccessoryServer::update_mdns() {
@@ -370,10 +380,12 @@ void AccessoryServer::update_mdns() {
 
 void AccessoryServer::stop() {
     HAP_LOG_INFO(config_.system, "HAP Server stopping...");
-    
+
+#ifdef HAP_ENABLE_BLE
     if (impl_->ble_transport) {
         impl_->ble_transport->stop();
     }
+#endif
     
     impl_->connections.clear();
     impl_->parsers.clear();
@@ -416,9 +428,11 @@ void AccessoryServer::reset_pairing_state() {
     }
     
     // Update BleTransport with new accessory ID
+#ifdef HAP_ENABLE_BLE
     if (impl_->ble_transport) {
         impl_->ble_transport->set_accessory_id(config_.accessory_id);
     }
+#endif
     
     // Reset IIDManager - allows IID reuse after factory reset
     if (iid_manager_) {
@@ -435,9 +449,11 @@ void AccessoryServer::factory_reset() {
     
     // Update advertising/mDNS
     update_mdns();
+#ifdef HAP_ENABLE_BLE
     if (impl_->ble_transport) {
         impl_->ble_transport->update_advertising();
     }
+#endif
     
     // Invoke user callback if set (device is now unpaired)
     if (config_.on_pairings_changed) {
@@ -600,9 +616,11 @@ void AccessoryServer::on_tcp_disconnect(uint32_t connection_id) {
 }
 
 void AccessoryServer::broadcast_event(uint64_t aid, uint64_t iid, const core::Value& value, uint32_t exclude_conn_id) {
+#ifdef HAP_ENABLE_BLE
     if (impl_->ble_transport) {
         impl_->ble_transport->notify_value_changed(aid, iid, value, exclude_conn_id);
     }
+#endif
     if(!config_.network) {
         return;
     }

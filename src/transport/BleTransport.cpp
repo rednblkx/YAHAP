@@ -3,7 +3,6 @@
 #include "hap/core/HAPStatus.hpp"
 #include "hap/common/Log.hpp"
 #include <algorithm>
-#include <cstdio>
 #include <cstring>
 
 #include "hap/core/TLV8.hpp"
@@ -14,11 +13,29 @@
 
 namespace {
 // Parse "AA:BB:CC:DD:EE:FF" into 6 bytes. Returns false on malformed input
-// (the output is zeroed in that case).
+// (the output is zeroed in that case). Hand-rolled instead of sscanf("%hhx:...")
+// so the libc scanf machinery stays out of embedded links.
 bool parse_device_id(const std::string& accessory_id, std::array<uint8_t, 6>& out) {
     out.fill(0);
-    return sscanf(accessory_id.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
-                  &out[0], &out[1], &out[2], &out[3], &out[4], &out[5]) == 6;
+    size_t i = 0;
+    for (size_t group = 0; group < 6; ++group) {
+        if (group > 0) {
+            if (i >= accessory_id.size() || accessory_id[i] != ':') return false;
+            ++i;
+        }
+        unsigned value = 0;
+        for (int digit = 0; digit < 2; ++digit) {
+            if (i >= accessory_id.size()) return false;
+            char c = accessory_id[i++];
+            value <<= 4;
+            if (c >= '0' && c <= '9') value |= static_cast<unsigned>(c - '0');
+            else if (c >= 'a' && c <= 'f') value |= static_cast<unsigned>(c - 'a' + 10);
+            else if (c >= 'A' && c <= 'F') value |= static_cast<unsigned>(c - 'A' + 10);
+            else return false;
+        }
+        out[group] = static_cast<uint8_t>(value);
+    }
+    return i == accessory_id.size();
 }
 
 // Parse a stored config-number string without throwing (from_chars, no locale).
