@@ -115,129 +115,152 @@ int main() {
         }
     };
 
-    auto accessory = std::make_shared<hap::core::Accessory>(1);
+    namespace chr = hap::characteristic;
+    auto accessory = std::make_unique<hap::core::Accessory>(1);
 
     // Accessory Information Service
-    auto info_service = hap::service::AccessoryInformationBuilder()
-        .name("HAP Bridge")
-        .manufacturer("Example Corp")
-        .model("HAP-Bridge-v1")
-        .serial_number("00000001")
-        .firmware_revision("1.0.0")
-        .hardware_revision("1.0.0")
-        .on_identify([]() {
+    hap::service::ServiceBuilder info(hap::service::kType_AccessoryInformation,
+                                      "Accessory Information");
+    info.add(chr::CharId::Name, "HAP Bridge")
+        .add(chr::CharId::Manufacturer, "Example Corp")
+        .add(chr::CharId::Model, "HAP-Bridge-v1")
+        .add(chr::CharId::SerialNumber, "00000001")
+        .add(chr::CharId::FirmwareRevision, "1.0.0")
+        .add(chr::CharId::Identify)
+        .on_write_bool([]() {
           std::cout << "🔆 IDENTIFY routine triggered!" << std::endl;
         })
-        .hardware_finish(hap::core::TLV8::encode({hap::core::TLV(0x01,{0xce,0xd5,0xda,0x00})}))
-        .build();
-    accessory->add_service(info_service);
+        .add(chr::CharId::HardwareRevision, "1.0.0")
+        .add(chr::CharId::HardwareFinish);
+    accessory->add_service(info.build());
 
     // HAP Protocol Information Service
-    auto protocol_info_service = hap::service::HAPProtocolInformationBuilder()
-        .build();
-    accessory->add_service(protocol_info_service);
+    accessory->add_service(
+        hap::service::ServiceBuilder(hap::service::kType_HAPProtocolInformation,
+                                     "Protocol Information")
+            .add(chr::CharId::Version)
+            .build());
 
     // Create Accessory using new simplified builders
-    auto accessory_2 = std::make_shared<hap::core::Accessory>(2);
+    auto accessory_2 = std::make_unique<hap::core::Accessory>(2);
 
     // Accessory Information Service
-    auto info_service_2 = hap::service::AccessoryInformationBuilder()
-        .name("HAP Lock")
-        .manufacturer("Example Corp")
-        .model("HAP-Lock-v1")
-        .serial_number("00000001")
-        .firmware_revision("1.0.0")
-        .hardware_revision("1.0.0")
-        .on_identify([]() {
+    hap::service::ServiceBuilder info2(hap::service::kType_AccessoryInformation,
+                                       "Accessory Information");
+    info2.add(chr::CharId::Name, "HAP Lock")
+        .add(chr::CharId::Manufacturer, "Example Corp")
+        .add(chr::CharId::Model, "HAP-Lock-v1")
+        .add(chr::CharId::SerialNumber, "00000001")
+        .add(chr::CharId::FirmwareRevision, "1.0.0")
+        .add(chr::CharId::Identify)
+        .on_write_bool([]() {
           std::cout << "🔆 IDENTIFY routine triggered!" << std::endl;
         })
-        .build();
-    accessory_2->add_service(info_service_2);
+        .add(chr::CharId::HardwareRevision, "1.0.0");
+    accessory_2->add_service(info2.build());
     // HAP Protocol Information Service
-    auto protocol_info_service_2 = hap::service::HAPProtocolInformationBuilder()
-        .build();
-    accessory_2->add_service(protocol_info_service_2);
-    std::shared_ptr<hap::core::Service> lock_service = hap::service::LockMechanismBuilder()
-        .on_lock_change([](bool locked) {
-            // Note: the transport has already written the target state into
-            // the characteristic; this callback only reacts to it.
+    accessory_2->add_service(
+        hap::service::ServiceBuilder(hap::service::kType_HAPProtocolInformation,
+                                     "Protocol Information")
+            .add(chr::CharId::Version)
+            .build());
+
+    // Lock Service — HAP 8.4: LockCurrentState follows LockTargetState.
+    hap::service::ServiceBuilder lock(hap::service::kType_LockMechanism, "Lock Mechanism", true);
+    hap::core::Characteristic* lock_current = lock.add(chr::CharId::LockCurrentStateChar).get();
+    lock.add(chr::CharId::LockTargetStateChar)
+        .on_write(
+                  [lock_current](const hap::core::Value& v) -> hap::core::WriteResponse {
+                      auto* target = std::get_if<uint8_t>(&v);
+                      if (target) lock_current->set_value(*target, hap::core::EventSource{});
+                      return std::nullopt;
+                  })
+        .on_write_bool([](bool locked) {
             std::cout << "🔒 Lock changed to " << (locked ? "LOCKED" : "UNLOCKED") << std::endl;
-        })
-        .build();
-    accessory_2->add_service(lock_service);
+        });
+    accessory_2->add_service(lock.build());
 
     // Lock Management Service - MANDATORY for Lock Profile per HAP Spec 11.2
-    auto lock_mgmt_service = hap::service::LockManagementBuilder()
-        .on_control_point([](const std::vector<uint8_t>& tlv) {
-            std::cout << "🔒 Control Point TLV: ";
-            for (uint8_t b : tlv) {
-                std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b);
-            }
-            std::cout << std::endl;
-        })
-        .build();
-    accessory_2->add_service(lock_mgmt_service);
+    accessory_2->add_service(
+        hap::service::ServiceBuilder(hap::service::kType_LockManagement, "Lock Management")
+            .add(chr::CharId::LockControlPoint)
+            .add(chr::CharId::Version)
+            .on_write_tlv(
+                          [](const std::vector<uint8_t>& tlv) {
+                std::cout << "🔒 Control Point TLV: ";
+                for (uint8_t b : tlv) {
+                    std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b);
+                }
+                std::cout << std::endl;
+            })
+            .build());
 
     // NFC Access Service
-    auto nfc_access_service = hap::service::NFCAccessBuilder()
-        .on_control_point([&](const std::vector<uint8_t>& tlv) -> std::optional<hap::core::Value> {
-            std::cout << "🔒 Control Point TLV: ";
-            for (uint8_t b : tlv) {
-                std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b);
-            }
-            std::cout << std::endl;
-            HK_HomeKit hk(*ddk_store, []() { return; }, const_cast<std::vector<uint8_t>&>(tlv));
-            std::vector<uint8_t> response = hk.processResult();
-            std::cout << "🔒 Response TLV: ";
-            for (uint8_t b : response) {
-              std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b);
-            }
-            std::cout << std::endl;
-            return response;
-        })
-        .build();
-    accessory_2->add_service(nfc_access_service);
+    accessory_2->add_service(
+        hap::service::ServiceBuilder(hap::service::kType_NFCAccess, "NFC Access")
+            .add(chr::CharId::NFCAccessControlPoint)
+            .add(chr::CharId::NFCAccessSupportedConfiguration)
+            .add(chr::CharId::ConfigurationState)
+            .on_write_response_tlv(
+                [&](const std::vector<uint8_t>& tlv) -> std::optional<hap::core::Value> {
+                std::cout << "🔒 Control Point TLV: ";
+                for (uint8_t b : tlv) {
+                    std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b);
+                }
+                std::cout << std::endl;
+                HK_HomeKit hk(*ddk_store, []() { return; }, const_cast<std::vector<uint8_t>&>(tlv));
+                std::vector<uint8_t> response = hk.processResult();
+                std::cout << "🔒 Response TLV: ";
+                for (uint8_t b : response) {
+                  std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b);
+                }
+                std::cout << std::endl;
+                return response;
+            })
+            .build());
 
     // Create Accessory using new simplified builders
-    auto accessory_3 = std::make_shared<hap::core::Accessory>(3);
+    auto accessory_3 = std::make_unique<hap::core::Accessory>(3);
 
     // Accessory Information Service
-    auto info_service_3 = hap::service::AccessoryInformationBuilder()
-        .name("HAP Light")
-        .manufacturer("Example Corp")
-        .model("HAP-Light-v1")
-        .serial_number("00000001")
-        .firmware_revision("1.0.0")
-        .hardware_revision("1.0.0")
-        .on_identify([]() {
+    hap::service::ServiceBuilder info3(hap::service::kType_AccessoryInformation,
+                                       "Accessory Information");
+    info3.add(chr::CharId::Name, "HAP Light")
+        .add(chr::CharId::Manufacturer, "Example Corp")
+        .add(chr::CharId::Model, "HAP-Light-v1")
+        .add(chr::CharId::SerialNumber, "00000001")
+        .add(chr::CharId::FirmwareRevision, "1.0.0")
+        .add(chr::CharId::Identify)
+        .on_write_bool([]() {
           std::cout << "🔆 IDENTIFY routine triggered!" << std::endl;
         })
-        .build();
-    accessory_3->add_service(info_service_3);
+        .add(chr::CharId::HardwareRevision, "1.0.0");
+    accessory_3->add_service(info3.build());
 
     // HAP Protocol Information Service
-    auto protocol_info_service_3 = hap::service::HAPProtocolInformationBuilder()
-        .build();
-    accessory_3->add_service(protocol_info_service_3);
+    accessory_3->add_service(
+        hap::service::ServiceBuilder(hap::service::kType_HAPProtocolInformation,
+                                     "Protocol Information")
+            .add(chr::CharId::Version)
+            .build());
 
-    auto light_builder = hap::service::LightBulbBuilder();
-    light_builder.with_brightness()
-        .on_change([](bool on) {
-            std::cout << "💡 Light changed to " << (on ? "ON" : "OFF") << std::endl;
-        })
-        .on_brightness_change([](int brightness) {
-            std::cout << "💡 Brightness changed to " << brightness << std::endl;
-        });
-
-    auto light_service = light_builder.build();
-
-    accessory_3->add_service(light_service);
+    accessory_3->add_service(
+        hap::service::ServiceBuilder(hap::service::kType_LightBulb, "Lightbulb", true)
+            .add(chr::CharId::On)
+            .on_write_bool([](bool on) {
+                std::cout << "💡 Light changed to " << (on ? "ON" : "OFF") << std::endl;
+            })
+            .add(chr::CharId::Brightness)
+            .on_write_int([](int brightness) {
+                std::cout << "💡 Brightness changed to " << brightness << std::endl;
+            })
+            .build());
 
     g_server = std::make_unique<hap::AccessoryServer>(std::move(config));
 
-    if (!g_server->add_accessory(accessory) ||
-        !g_server->add_accessory(accessory_2) ||
-        !g_server->add_accessory(accessory_3)) {
+    if (!g_server->add_accessory(std::move(accessory)) ||
+        !g_server->add_accessory(std::move(accessory_2)) ||
+        !g_server->add_accessory(std::move(accessory_3))) {
         std::cerr << "Failed to register accessory (duplicate AID or limits exceeded)" << std::endl;
         return 1;
     }
