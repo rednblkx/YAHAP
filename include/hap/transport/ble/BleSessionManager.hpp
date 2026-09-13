@@ -26,6 +26,7 @@ struct TransactionState {
     bool gsn_incremented = false;           // Per spec: GSN increments only once per connection
     std::vector<uint8_t> timed_write_body;  // Body data pending for ExecuteWrite
     uint16_t timed_write_iid = 0;           // IID for pending timed write
+    uint64_t timed_write_expiry_ms = 0;     // Absolute deadline: TTL after the timed-write response (7.3.5.4)
 };
 
 /**

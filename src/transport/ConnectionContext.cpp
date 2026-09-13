@@ -8,11 +8,13 @@ ConnectionContext::ConnectionContext(platform::Crypto* crypto, platform::System*
 void ConnectionContext::upgrade_to_secure(
     std::tuple<std::array<uint8_t, 32>, std::array<uint8_t, 32>> session_keys,
     const std::array<uint8_t, 32>& shared_secret,
-    std::string controller_id) {
+    std::string controller_id,
+    bool admin) {
     auto [a_key, c_key] = session_keys;
     secure_session_ = std::make_unique<SecureSession>(crypto_, a_key, c_key);
     session_shared_secret_ = shared_secret;
     controller_id_ = std::move(controller_id);
+    admin_ = admin;
 }
 
 void ConnectionContext::add_subscription(uint64_t aid, uint64_t iid) {

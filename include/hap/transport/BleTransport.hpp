@@ -86,13 +86,25 @@ public:
 
     /**
      * @brief Check for session timeouts and disconnect idle connections.
-     * 
+     *
      * Per HAP Spec:
      * - 30-second idle timeout (7.2.5)
      * - 10-second HAP procedure timeout (7.3.1)
      * - 10-second initial procedure timeout (7.5 Req #40)
      */
     void check_session_timeouts();
+
+    /**
+     * @brief Install session keys on a connection's context.
+     *
+     * Mirrors what Pair Verify completion does (via complete_pair_verify) and
+     * exists so tests can set up an encrypted session without running the
+     * full SRP/X25519 exchange.
+     */
+    void establish_secure_session(uint16_t connection_id,
+                                  std::tuple<std::array<uint8_t, 32>, std::array<uint8_t, 32>> session_keys,
+                                  const std::array<uint8_t, 32>& shared_secret,
+                                  const std::string& controller_id);
 
 private:
     Config config_;
@@ -150,6 +162,7 @@ private:
     void setup_protocol_info_service();
 
     [[nodiscard]] uint16_t get_ble_iid(const std::string& key);
+    [[nodiscard]] bool iid_is_version(uint16_t iid) const;
     void add_service_instance_id_characteristic(platform::Ble::ServiceDefinition& svc, uint16_t svc_iid);
     void add_pairing_characteristic(platform::Ble::ServiceDefinition& svc,
                                     uint16_t svc_iid, uint16_t svc_type,
@@ -160,7 +173,6 @@ private:
     uint16_t get_current_gsn();
     
     void handle_hap_write(uint16_t connection_id, uint16_t char_type, std::span<const uint8_t> data);
-    void handle_hap_write_with_id(uint16_t connection_id, uint16_t char_type, std::span<const uint8_t> data);
     std::vector<uint8_t> handle_hap_read(uint16_t connection_id);
     
     void process_transaction(uint16_t connection_id, ble::TransactionState& state);

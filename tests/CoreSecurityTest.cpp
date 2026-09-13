@@ -16,6 +16,7 @@
 #include "MockPal.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <vector>
 
 using namespace hap;
@@ -481,6 +482,105 @@ void test_pair_verify_m4_cleartext_then_upgrade() {
     CHECK(!ctx.is_encrypted()); // nothing pending -> still no upgrade
 }
 
+// ---------------------------------------------------------------------------
+// Pairing endpoint conformance (HAP spec 5.6, 5.10-5.12)
+// ---------------------------------------------------------------------------
+
+// HAP 5.6.2 step 1: Pair Setup on an already-paired accessory must return
+// kTLVError_Unavailable instead of starting a new SRP session.
+void test_pair_setup_rejected_when_paired() {
+    testmock::MockCrypto crypto;
+    testmock::MockStorage storage;
+    testmock::MockSystem system{true};
+
+    const char* list = "[\"controller-1\"]";
+    storage.set("pairing_list", std::vector<uint8_t>(list, list + strlen(list)));
+
+    PairingEndpoints::Config config;
+    config.crypto = &crypto;
+    config.storage = &storage;
+    config.system = &system;
+    config.accessory_id = "AA:BB:CC:DD:EE:FF";
+    config.setup_code = "123-45-678";
+    PairingEndpoints endpoints(config);
+
+    transport::ConnectionContext ctx(&crypto, &system, 1);
+    Request req;
+    req.method = Method::POST;
+    req.path = "/pair-setup";
+    std::vector<core::TLV> m1 = {
+        {static_cast<uint8_t>(pairing::TLVType::State), static_cast<uint8_t>(pairing::PairingState::M1)},
+        {static_cast<uint8_t>(pairing::TLVType::Method), static_cast<uint8_t>(pairing::PairingMethod::PairSetup)},
+    };
+    req.body = core::TLV8::encode(m1);
+
+    auto resp = endpoints.handle_pair_setup(req, ctx);
+    CHECK_EQ(resp.status, Status::OK);
+    auto tlvs = core::TLV8::parse(resp.body);
+    auto state = core::TLV8::find_uint8(tlvs, static_cast<uint8_t>(pairing::TLVType::State));
+    auto error = core::TLV8::find_uint8(tlvs, static_cast<uint8_t>(pairing::TLVType::Error));
+    CHECK(state && *state == static_cast<uint8_t>(pairing::PairingState::M2));
+    CHECK(error && *error == static_cast<uint8_t>(pairing::TLVError::Unavailable));
+}
+
+// HAP 5.10.2: Add Pairing must reject a new controller when 16 pairings
+// already exist (MaxPeers) and must reject a mismatched LTPK for an existing
+// identifier (Unknown).
+void test_add_pairing_maxpeers_and_ltpk_match() {
+    testmock::MockCrypto crypto;
+    testmock::MockStorage storage;
+    testmock::MockSystem system{true};
+
+    PairingEndpoints::Config config;
+    config.crypto = &crypto;
+    config.storage = &storage;
+    config.system = &system;
+    config.accessory_id = "AA:BB:CC:DD:EE:FF";
+    PairingEndpoints endpoints(config);
+
+    transport::ConnectionContext admin_ctx(&crypto, &system, 1);
+    admin_ctx.upgrade_to_secure({{}, {}}, {}, "admin-1", /*admin=*/true);
+
+    auto add_pairing = [&](const std::string& id, const std::vector<uint8_t>& ltpk) {
+        Request req;
+        req.method = Method::POST;
+        req.path = "/pairings";
+        std::vector<core::TLV> m1 = {
+            {static_cast<uint8_t>(pairing::TLVType::State), static_cast<uint8_t>(pairing::PairingState::M1)},
+            {static_cast<uint8_t>(pairing::TLVType::Method), static_cast<uint8_t>(pairing::PairingMethod::AddPairing)},
+            {static_cast<uint8_t>(pairing::TLVType::Identifier), id},
+            {static_cast<uint8_t>(pairing::TLVType::PublicKey), ltpk},
+            {static_cast<uint8_t>(pairing::TLVType::Permissions), static_cast<uint8_t>(0x01)},
+        };
+        req.body = core::TLV8::encode(m1);
+        auto resp = endpoints.handle_pairings(req, admin_ctx);
+        return core::TLV8::parse(resp.body);
+    };
+
+    std::vector<uint8_t> ltpk(32, 0xAA);
+    // Fill to the 16-pairing minimum.
+    for (int i = 0; i < 16; ++i) {
+        auto tlvs = add_pairing("ctl-" + std::to_string(i), ltpk);
+        auto error = core::TLV8::find_uint8(tlvs, static_cast<uint8_t>(pairing::TLVType::Error));
+        CHECK(!error); // each add succeeds
+    }
+    // 17th pairing must be refused with MaxPeers.
+    auto tlvs17 = add_pairing("ctl-overflow", ltpk);
+    auto err17 = core::TLV8::find_uint8(tlvs17, static_cast<uint8_t>(pairing::TLVType::Error));
+    CHECK(err17 && *err17 == static_cast<uint8_t>(pairing::TLVError::MaxPeers));
+
+    // Existing identifier + different LTPK -> Unknown (5.10.2 step 3a).
+    std::vector<uint8_t> other_ltpk(32, 0xBB);
+    auto tlvs_bad = add_pairing("ctl-0", other_ltpk);
+    auto err_bad = core::TLV8::find_uint8(tlvs_bad, static_cast<uint8_t>(pairing::TLVType::Error));
+    CHECK(err_bad && *err_bad == static_cast<uint8_t>(pairing::TLVError::Unknown));
+
+    // Existing identifier + matching LTPK -> success (permissions update path).
+    auto tlvs_ok = add_pairing("ctl-0", ltpk);
+    auto err_ok = core::TLV8::find_uint8(tlvs_ok, static_cast<uint8_t>(pairing::TLVType::Error));
+    CHECK(!err_ok);
+}
+
 int main() {
     RUN_TEST(test_secure_session_frame_roundtrip);
     RUN_TEST(test_secure_session_incremental_decrypt);
@@ -502,5 +602,7 @@ int main() {
     RUN_TEST(test_lock_write_fires_events);
     RUN_TEST(test_builder_write_callbacks_compose);
     RUN_TEST(test_pair_verify_m4_cleartext_then_upgrade);
+    RUN_TEST(test_pair_setup_rejected_when_paired);
+    RUN_TEST(test_add_pairing_maxpeers_and_ltpk_match);
     return 0;
 }

@@ -3,6 +3,7 @@
 #include "hap/common/Log.hpp"
 #include "hap/common/JsonValue.hpp"
 #include <algorithm>
+#include <cstring>
 
 namespace hap::pairing {
 
@@ -68,7 +69,19 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m1(const std::vector<core:
         HAP_LOG_ERROR(config_.system, "[PairSetup] Invalid or missing pairing method in M1");
         return build_error_response(PairingState::M2, TLVError::Unknown);
     }
-    
+
+    // HAP 5.6.2 step 2: once locked out (>100 failed attempts), refuse to
+    // even start a new SRP session.
+    auto fail_data = config_.storage->get("pair_setup_fails");
+    if (fail_data && fail_data->size() == sizeof(uint32_t)) {
+        uint32_t fails = 0;
+        std::memcpy(&fails, fail_data->data(), sizeof(uint32_t));
+        if (fails > 100) {
+            HAP_LOG_WARN(config_.system, "[PairSetup] Locked out after ", fails, " failed attempts");
+            return build_error_response(PairingState::M2, TLVError::MaxTries);
+        }
+    }
+
     HAP_LOG(config_.system, "[PairSetup] Creating SRP verifier");
     srp_session_ = config_.crypto->srp_new_verifier("Pair-Setup", config_.setup_code);
     if (!srp_session_) {
@@ -117,8 +130,26 @@ std::optional<std::vector<uint8_t>> PairSetup::handle_m3(const std::vector<core:
     HAP_LOG(config_.system, "[PairSetup] Verifying client proof");
     if (!config_.crypto->srp_verify_client_proof(srp_session_.get(), *client_proof)) {
         HAP_LOG_ERROR(config_.system, "[PairSetup] Client proof verification FAILED");
+        // HAP 5.6.2 step 2: after more than 100 unsuccessful authentication
+        // attempts the accessory must refuse further Pair Setup with MaxTries.
+        // The counter persists so a reboot cannot reset the lockout.
+        uint32_t fails = 0;
+        auto fail_data = config_.storage->get("pair_setup_fails");
+        if (fail_data && fail_data->size() == sizeof(uint32_t)) {
+            std::memcpy(&fails, fail_data->data(), sizeof(uint32_t));
+        }
+        ++fails;
+        std::vector<uint8_t> fail_bytes(sizeof(uint32_t));
+        std::memcpy(fail_bytes.data(), &fails, sizeof(uint32_t));
+        config_.storage->set("pair_setup_fails", fail_bytes);
+        if (fails > 100) {
+            return build_error_response(PairingState::M4, TLVError::MaxTries);
+        }
         return build_error_response(PairingState::M4, TLVError::Authentication);
     }
+
+    // Successful authentication clears the failed-attempt counter.
+    config_.storage->remove("pair_setup_fails");
     
     HAP_LOG_INFO(config_.system, "[PairSetup] Client proof verified successfully");
     

@@ -94,7 +94,11 @@ public:
         for (size_t i = 0; i < plaintext.size(); ++i) {
             ciphertext[i] = static_cast<uint8_t>(plaintext[i] ^ key[i % key.size()] ^ nonce[i % nonce.size()]);
         }
-        auto t = compute_tag(key, nonce, aad, plaintext);
+        // The tag must cover the CIPHERTEXT (as in real AEAD): decrypt verifies
+        // over the ciphertext, so a plaintext-based tag only round-trips when
+        // the keystream happens to be all zeros.
+        auto t = compute_tag(key, nonce, aad,
+                             std::span<const uint8_t>(ciphertext.data(), plaintext.size()));
         std::copy(t.begin(), t.end(), tag.begin());
         return true;
     }

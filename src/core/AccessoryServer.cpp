@@ -482,6 +482,14 @@ void AccessoryServer::on_tcp_receive(uint32_t connection_id, std::span<const uin
         if (!decrypted) {
             HAP_LOG_WARN(config_.system,
                 "[AccessoryServer] Decryption failed or incomplete frame for connection #", connection_id);
+            // HAP 6.5.2: a decryption failure must immediately close the
+            // connection used for the session. (An incomplete-frame buffer
+            // returns nullopt too, but SecureSession keeps it buffered; a
+            // failure here is either an auth failure or a hard protocol
+            // error, both of which mandate the disconnect.)
+            ctx->request_close();
+            config_.network->tcp_disconnect(connection_id);
+            impl_->erase_connection(connection_id);
             return;
         }
         plaintext_data = *decrypted;

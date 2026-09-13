@@ -1,4 +1,5 @@
 #include "hap/transport/BleTransport.hpp"
+#include "hap/transport/SecureSession.hpp"
 #include "hap/types/ServiceTypes.hpp"
 #include "hap/core/HAPStatus.hpp"
 #include "TestUtil.hpp"
@@ -136,6 +137,37 @@ private:
 
 static constexpr const char* kPairSetupUUID = "0000004C-0000-1000-8000-0026BB765291";
 static constexpr const char* kCharInstanceIdDescUUID = "DC46F0FE-81D2-4616-B5D9-6ABDD796939A";
+
+// HAP 7.4.7.2: writes to user characteristics require a secure session. The
+// tests install session keys on the transport (mirroring Pair Verify
+// completion) and encrypt outgoing PDUs with a real SecureSession driven by
+// MockCrypto's XOR AEAD. Nonces advance per fragment in both directions, so
+// the helper must be constructed fresh per write and reused for the read.
+struct SecureChannel {
+    transport::SecureSession client; // controller side: a2c = accessory->controller
+
+    SecureChannel(testmock::MockCrypto& crypto)
+        : client(&crypto, /*a2c=*/std::array<uint8_t, 32>{}, /*c2a=*/std::array<uint8_t, 32>{}) {}
+
+    static void install(BleTransport& t, uint16_t conn_id) {
+        t.establish_secure_session(conn_id,
+                                   {std::array<uint8_t, 32>{}, std::array<uint8_t, 32>{}},
+                                   std::array<uint8_t, 32>{}, "controller-1");
+    }
+
+    // Encrypt one outgoing HAP PDU fragment (controller -> accessory).
+    std::vector<uint8_t> encrypt(const std::vector<uint8_t>& pdu) {
+        return client.encrypt_ble_pdu(pdu);
+    }
+
+    // Decrypt the accessory's buffered response (accessory -> controller).
+    std::vector<uint8_t> decrypt(const std::vector<uint8_t>& frame) {
+        auto plain = client.decrypt_ble_pdu(frame);
+        CHECK(plain.has_value());
+        return std::move(*plain);
+    }
+};
+
 struct TestRig {
     MockBle ble;
     testmock::MockCrypto crypto;
@@ -235,14 +267,13 @@ void test_pdu_reassembly() {
     std::vector<uint8_t> p2 = {0x80, 0x01, 'W', 'o', 'r', 'l', 'd'};
     rig.ble.write(kPairSetupUUID, conn, p2, false);
 
-    // The write reaches the (mock) pairing endpoint through the BLE TLV unwrap;
-    // body has no 0x01 value TLV so the transport answers with an error status.
+    // The write targets IID=1, which matches no registered characteristic, so
+    // the transport rejects it with Invalid Instance ID (Table 7-37, 0x04).
     std::vector<uint8_t> response = rig.ble.read(kPairSetupUUID, conn);
     CHECK(!response.empty());
     CHECK_EQ_HEX(response[0], 0x02); // CF: response
     CHECK_EQ_HEX(response[1], 0x01); // TID matches
-    // Status: 0x05 (invalid request) — body carried no Value TLV.
-    CHECK_EQ_HEX(response[2], 0x05);
+    CHECK_EQ_HEX(response[2], 0x04); // Invalid Instance ID
 }
 
 void test_service_signature_read() {
@@ -427,6 +458,9 @@ void test_timed_write_fires_connected_event() {
     BleTransport transport(config);
     transport.start();
 
+    // HAP 7.4.7.2: writes to user characteristics require a secure session.
+    SecureChannel::install(transport, 1);
+
     // Find the On characteristic's GATT definition and its IID.
     const std::string kOnUUID = "00000025-0000-1000-8000-0026BB765291";
     const auto* def = ble.find(kOnUUID);
@@ -457,13 +491,17 @@ void test_timed_write_fires_connected_event() {
     pdu.push_back(len & 0xFF);
     pdu.push_back((len >> 8) & 0xFF);
     pdu.insert(pdu.end(), tlvs.begin(), tlvs.end());
-    ble.write(kOnUUID, 1, pdu, false);
 
     // Execute write.
     std::vector<uint8_t> exec = {0x00, 0x05, 0x0A,
                                  static_cast<uint8_t>(iid & 0xFF),
                                  static_cast<uint8_t>(iid >> 8)};
-    ble.write(kOnUUID, 1, exec, false);
+
+    {
+        SecureChannel chan(crypto);
+        ble.write(kOnUUID, 1, chan.encrypt(pdu), false);
+        ble.write(kOnUUID, 1, chan.encrypt(exec), false);
+    }
 
     // The characteristic value must have been applied... (ownership moved
     // into the service; reach it through the accessory in the database)
@@ -496,10 +534,10 @@ void test_lock_timed_write_notifies_writer_connection() {
     core::AttributeDatabase db;
     auto acc = std::make_unique<core::Accessory>(1);
     hap::service::ServiceBuilder lock_builder(hap::service::kType_LockMechanism, "Lock Mechanism", true);
-    hap::core::Characteristic* lock_current;
-    lock_builder.add(hap::characteristic::CharId::LockCurrentStateChar, &lock_current)
-        .add(hap::characteristic::CharId::LockTargetStateChar)
-        .on_write(hap::characteristic::kType_LockTargetState,
+    hap::core::Characteristic* lock_current =
+        lock_builder.add(hap::characteristic::CharId::LockCurrentStateChar).get();
+    lock_builder.add(hap::characteristic::CharId::LockTargetStateChar)
+        .on_write(
                   [lock_current](const hap::core::Value& v) -> hap::core::WriteResponse {
                       // HAP 8.4: LockCurrentState follows LockTargetState.
                       auto* target = std::get_if<uint8_t>(&v);
@@ -521,6 +559,9 @@ void test_lock_timed_write_notifies_writer_connection() {
     BleTransport transport(config);
     transport.start();
 
+    // HAP 7.4.7.2: writes to user characteristics require a secure session.
+    SecureChannel::install(transport, 0);
+
     ble.connect(0);
     ble.subscribe("0000001D-0000-1000-8000-0026BB765291", 0, true); // CurrentState
     ble.subscribe("0000001E-0000-1000-8000-0026BB765291", 0, true); // TargetState
@@ -535,9 +576,12 @@ void test_lock_timed_write_notifies_writer_connection() {
         p.insert(p.end(), tlvs.begin(), tlvs.end());
         return p;
     };
+
+    SecureChannel chan(crypto);
     ble.write("0000001E-0000-1000-8000-0026BB765291", 0,
-              pdu_for(0x04, 1, {0x01, 0x01, 0x00}), false);
-    ble.write("0000001E-0000-1000-8000-0026BB765291", 0, pdu_for(0x05, 2, {}), false);
+              chan.encrypt(pdu_for(0x04, 1, {0x01, 0x01, 0x00})), false);
+    ble.write("0000001E-0000-1000-8000-0026BB765291", 0,
+              chan.encrypt(pdu_for(0x05, 2, {})), false);
 
     // Value must be applied...
     auto v = chars[0]->get_value();
@@ -557,12 +601,165 @@ void test_lock_timed_write_notifies_writer_connection() {
     CHECK(tgt_indications >= 1);
 }
 
+// HAP 7.3.5.4 / test requirement #17: an Execute-Write arriving after the
+// TTL from the timed write has expired must be rejected (0x06) and the
+// queued write discarded — the characteristic value must NOT change.
+void test_timed_write_expired_ttl_rejected() {
+    TestRig rig;
+    rig.system.advance_ms(0); // normalize clock
+    uint16_t iid = pair_setup_iid(rig);
+
+    // Timed write (opcode 0x04) TID=7 with Value + TTL TLVs: TTL=0x01 -> 100ms.
+    std::vector<uint8_t> tlvs = {0x01, 0x01, 0x7F, 0x08, 0x01, 0x01};
+    std::vector<uint8_t> pdu;
+    pdu.push_back(0x00);
+    pdu.push_back(0x04);
+    pdu.push_back(0x07);
+    pdu.push_back(static_cast<uint8_t>(iid & 0xFF));
+    pdu.push_back(static_cast<uint8_t>(iid >> 8));
+    uint16_t len = static_cast<uint16_t>(tlvs.size());
+    pdu.push_back(len & 0xFF);
+    pdu.push_back((len >> 8) & 0xFF);
+    pdu.insert(pdu.end(), tlvs.begin(), tlvs.end());
+    rig.ble.write(kPairSetupUUID, 1, pdu, false);
+
+    // Let the TTL lapse (the deadline starts when the timed-write response
+    // is delivered; the mock clock advances deterministically).
+    rig.system.advance_ms(200);
+
+    // Execute write (opcode 0x05) TID=8.
+    std::vector<uint8_t> exec = {0x00, 0x05, 0x08,
+                                 static_cast<uint8_t>(iid & 0xFF),
+                                 static_cast<uint8_t>(iid >> 8)};
+    rig.ble.write(kPairSetupUUID, 1, exec, false);
+
+    std::vector<uint8_t> response = rig.ble.read(kPairSetupUUID, 1);
+    CHECK(!response.empty());
+    CHECK_EQ_HEX(response[0], 0x02);
+    CHECK_EQ_HEX(response[1], 0x08); // TID of the execute step
+    CHECK_EQ_HEX(response[2], 0x06); // Invalid Request: TTL expired
+}
+
+// HAP test requirement #6: an unknown opcode must fail the request with
+// Unsupported-PDU (0x01) instead of being silently ignored.
+void test_unsupported_opcode_rejected() {
+    TestRig rig;
+    uint16_t iid = pair_setup_iid(rig);
+
+    std::vector<uint8_t> pdu = {0x00, 0x63, 0x0F, // opcode 0x63 = unknown
+                                static_cast<uint8_t>(iid & 0xFF),
+                                static_cast<uint8_t>(iid >> 8)};
+    rig.ble.write(kPairSetupUUID, 1, pdu, false);
+
+    std::vector<uint8_t> response = rig.ble.read(kPairSetupUUID, 1);
+    CHECK(!response.empty());
+    CHECK_EQ_HEX(response[0], 0x02);
+    CHECK_EQ_HEX(response[1], 0x0F);
+    CHECK_EQ_HEX(response[2], 0x01); // Unsupported PDU
+}
+
+// Regression for a device-observed failure: on an UNPAIRED accessory the
+// controller performs signature reads without a secure session (HAP 7.3.5.1
+// requires the procedure to work with and without one). The security gate
+// must key on the PROCEDURE, not the target characteristic, or discovery
+// before pairing is impossible.
+void test_signature_read_allowed_without_session() {
+    TestRig rig;
+    uint16_t iid = pair_setup_iid(rig);
+
+    // Opcode 0x01 = Characteristic Signature Read, no secure session.
+    std::vector<uint8_t> pdu = {0x00, 0x01, 0x21,
+                                static_cast<uint8_t>(iid & 0xFF),
+                                static_cast<uint8_t>(iid >> 8)};
+    rig.ble.write(kPairSetupUUID, 1, pdu, false);
+
+    std::vector<uint8_t> response = rig.ble.read(kPairSetupUUID, 1);
+    CHECK(!response.empty());
+    CHECK_EQ_HEX(response[0], 0x02);
+    CHECK_EQ_HEX(response[1], 0x21);
+    CHECK_EQ_HEX(response[2], 0x00); // Success - NOT the 0x05 rejection
+    CHECK(response.size() > 5);      // and a real signature body
+}
+
+// Regression for a device-observed failure: a rejected write (0x05) must
+// still produce a response the controller can read. The rejection path used
+// to skip the transaction bookkeeping, so the follow-up GATT read hit the
+// 10-second window check with a zero timestamp and returned nothing.
+void test_rejected_write_response_is_readable() {
+    TestRig rig;
+    rig.system.advance_ms(0);
+    uint16_t iid = pair_setup_iid(rig);
+
+    // A Characteristic Read (0x03) targets a value-bearing characteristic;
+    // with no secure session it must be rejected with 0x05...
+    std::vector<uint8_t> pdu = {0x00, 0x03, 0x33,
+                                static_cast<uint8_t>(iid & 0xFF),
+                                static_cast<uint8_t>(iid >> 8)};
+    rig.ble.write(kPairSetupUUID, 1, pdu, false);
+
+    // ...and that rejection must be retrievable by the follow-up GATT read.
+    std::vector<uint8_t> response = rig.ble.read(kPairSetupUUID, 1);
+    CHECK(!response.empty());
+    CHECK_EQ_HEX(response[0], 0x02);
+    CHECK_EQ_HEX(response[1], 0x33);
+    CHECK_EQ_HEX(response[2], 0x05); // Insufficient Authentication
+}
+
+// Regression for the "Not Supported" tile: the controller reads the Protocol
+// Information Service's Version characteristic (0x37) in the clear BEFORE
+// pairing to decide protocol compatibility. Rejecting that read with 0x05
+// makes iOS mark the accessory as not supporting HAP-BLE 2.x.
+void test_version_char_readable_without_session() {
+    TestRig rig;
+
+    // Recover the Version characteristic's IID from its registration log
+    // equivalent: find it via the pairing-characteristic metadata by writing
+    // a signature read for each pairing char IID. Simpler: the descriptor on
+    // the 0x37 GATT characteristic carries the IID.
+    const std::string kVersionUUID = "00000037-0000-1000-8000-0026BB765291";
+    const auto* def = rig.ble.find(kVersionUUID);
+    CHECK(def != nullptr);
+    uint16_t iid = 0;
+    for (const auto& d : def->descriptors) {
+        if (d.uuid == kCharInstanceIdDescUUID && d.on_read) {
+            auto v = d.on_read(0);
+            CHECK(v.size() == 2);
+            iid = static_cast<uint16_t>(v[0] | (v[1] << 8));
+        }
+    }
+    CHECK(iid != 0);
+
+    // Opcode 0x03 = Characteristic Read, no secure session.
+    std::vector<uint8_t> pdu = {0x00, 0x03, 0x44,
+                                static_cast<uint8_t>(iid & 0xFF),
+                                static_cast<uint8_t>(iid >> 8)};
+    rig.ble.write(kPairSetupUUID, 1, pdu, false);
+
+    std::vector<uint8_t> response = rig.ble.read(kPairSetupUUID, 1);
+    CHECK(!response.empty());
+    CHECK_EQ_HEX(response[0], 0x02);
+    CHECK_EQ_HEX(response[1], 0x44);
+    CHECK_EQ_HEX(response[2], 0x00); // Success - NOT the 0x05 rejection
+
+    // Body: TLV 0x01 (HAP-Param-Value) wrapping "2.2.0" (HAP 7.4.3.1).
+    CHECK(response.size() == 5 + 7);
+    CHECK_EQ_HEX(response[5], 0x01);
+    CHECK_EQ_HEX(response[6], 0x05);
+    CHECK(std::equal(response.begin() + 7, response.begin() + 12,
+                     std::string("2.2.0").begin()));
+}
+
 int main() {
     RUN_TEST(test_advertising_layout);
     RUN_TEST(test_pdu_reassembly);
     RUN_TEST(test_service_signature_read);
     RUN_TEST(test_write_with_response);
     RUN_TEST(test_timed_write_then_execute);
+    RUN_TEST(test_timed_write_expired_ttl_rejected);
+    RUN_TEST(test_unsupported_opcode_rejected);
+    RUN_TEST(test_signature_read_allowed_without_session);
+    RUN_TEST(test_rejected_write_response_is_readable);
+    RUN_TEST(test_version_char_readable_without_session);
     RUN_TEST(test_timed_write_fires_connected_event);
     RUN_TEST(test_lock_timed_write_notifies_writer_connection);
     return 0;

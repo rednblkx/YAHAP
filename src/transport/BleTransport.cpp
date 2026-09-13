@@ -158,6 +158,16 @@ uint16_t BleTransport::get_ble_iid(const std::string& key) {
     return static_cast<uint16_t>((iid & 0x7FFF) + 1);
 }
 
+bool BleTransport::iid_is_version(uint16_t iid) const {
+    // The Protocol Information Service's Version characteristic (0x37) must be
+    // readable in the clear: the controller reads it before pairing to decide
+    // protocol compatibility (HAP 7.4.3.1, test requirement #3).
+    for (const auto& m : pairing_char_metadata_) {
+        if (m.instance_id == iid) return m.char_type == 0x37;
+    }
+    return false;
+}
+
 void BleTransport::add_service_instance_id_characteristic(
         platform::Ble::ServiceDefinition& svc, uint16_t svc_iid) {
     platform::Ble::CharacteristicDefinition def;
@@ -394,7 +404,7 @@ void BleTransport::increment_gsn() {
 
 void BleTransport::check_session_timeouts() {
     auto timed_out = session_manager_->check_timeouts();
-    
+
     for (uint16_t conn_id : timed_out) {
         session_manager_->remove(conn_id);
         config_.ble->disconnect(conn_id);
@@ -402,14 +412,22 @@ void BleTransport::check_session_timeouts() {
     }
 }
 
-void BleTransport::handle_hap_write_with_id(uint16_t connection_id, uint16_t char_type, std::span<const uint8_t> data) {
-    HAP_LOG(config_.system, "[BleTransport] Write to Char Type: 0x", hex4(char_type));
-    handle_hap_write(connection_id, char_type, data);
+void BleTransport::establish_secure_session(
+        uint16_t connection_id,
+        std::tuple<std::array<uint8_t, 32>, std::array<uint8_t, 32>> session_keys,
+        const std::array<uint8_t, 32>& shared_secret,
+        const std::string& controller_id) {
+    auto& session = session_manager_->get_or_create(connection_id);
+    if (!session.context) {
+        session.context = std::make_unique<ConnectionContext>(config_.crypto, config_.system, connection_id);
+    }
+    session.context->upgrade_to_secure(std::move(session_keys), shared_secret, controller_id);
 }
 
 void BleTransport::handle_hap_write(uint16_t connection_id, uint16_t char_type, std::span<const uint8_t> data) {
     if (data.empty()) return;
-    
+
+    HAP_LOG(config_.system, "[BleTransport] Write to Char Type: 0x", hex4(char_type));
     HAP_LOG(config_.system, "[BleTransport] Write PDU Fragment (", data.size(), " bytes): ", to_hex_string(data.data(), data.size()));
 
     bool session_is_secured = false;
@@ -450,7 +468,7 @@ void BleTransport::handle_hap_write(uint16_t connection_id, uint16_t char_type, 
     bool continuation = (control_field & 0x80) != 0;
     PDUOpcode opcode = PDUOpcode::CharacteristicWrite;
     uint16_t tid = 0;
-    
+
     if (!continuation) {
         if (working_data.size() < 3) {
             HAP_LOG_ERROR(config_.system, "[BleTransport] PDU too short");
@@ -458,7 +476,40 @@ void BleTransport::handle_hap_write(uint16_t connection_id, uint16_t char_type, 
         }
         opcode = static_cast<PDUOpcode>(working_data[1]);
         tid = working_data[2];
-        
+
+        // HAP test requirement #6: malformed PDUs must fail the request.
+        // Reject unknown opcodes with Unsupported-PDU (Table 7-37, 0x01).
+        switch (opcode) {
+            case PDUOpcode::CharacteristicSignatureRead:
+            case PDUOpcode::CharacteristicWrite:
+            case PDUOpcode::CharacteristicRead:
+            case PDUOpcode::CharacteristicTimedWrite:
+            case PDUOpcode::CharacteristicExecuteWrite:
+            case PDUOpcode::ServiceSignatureRead:
+            case PDUOpcode::CharacteristicConfiguration:
+            case PDUOpcode::ProtocolConfiguration:
+                break;
+            default:
+                HAP_LOG_WARN(config_.system, "[BleTransport] Unsupported PDU opcode 0x", hex4(static_cast<uint16_t>(working_data[1])));
+                send_response(connection_id, tid, char_type, 0x01, {});
+                return;
+        }
+
+        const bool is_signature_read =
+            opcode == PDUOpcode::CharacteristicSignatureRead ||
+            opcode == PDUOpcode::ServiceSignatureRead;
+        const bool is_version_read =
+            opcode == PDUOpcode::CharacteristicRead &&
+            working_data.size() >= 5 &&
+            iid_is_version(static_cast<uint16_t>(working_data[3]) |
+                           (static_cast<uint16_t>(working_data[4]) << 8));
+        if (requires_encryption && !session_is_secured && !is_signature_read && !is_version_read) {
+            HAP_LOG_WARN(config_.system, "[BleTransport] Procedure 0x", hex4(static_cast<uint16_t>(opcode)),
+                         " on secured characteristic without secure session - rejecting (0x05)");
+            send_response(connection_id, tid, char_type, 0x05, {});
+            return;
+        }
+
         HAP_LOG_INFO(config_.system, "[BleTransport] New Transaction TID=", tid, " Opcode=", (int)opcode);
         
         auto& state = session_manager_->get_or_create(connection_id).transaction;
@@ -504,17 +555,25 @@ std::vector<uint8_t> BleTransport::handle_hap_read(uint16_t connection_id) {
     auto* session = session_manager_->get_session(connection_id);
     if (session) {
         auto& state = session->transaction;
-        
-        if (state.last_write_ms > 0) {
-            uint64_t current_time = config_.system->millis();
-            uint64_t time_since_write = current_time - state.last_write_ms;
-            
-            if (time_since_write > 10000) { // 10 seconds
-                HAP_LOG_WARN(config_.system, "[BleTransport] Rejecting GATT Read - >10s since write (Req #12)");
-                return {};
-            }
+
+        // HAP test requirement #12: a GATT Read is valid only if preceded by a
+        // GATT Write carrying the same transaction ID at most 10 seconds ago.
+        // The PAL read callback doesn't know the controller's expected TID, so
+        // we serve the buffered response for the most recent completed
+        // transaction; anything else (no write at all, or stale by >10s) is
+        // rejected with an empty read.
+        if (state.last_write_ms == 0 && state.response_buffer.empty()) {
+            HAP_LOG_WARN(config_.system, "[BleTransport] Rejecting GATT Read - no preceding write (Req #12)");
+            return {};
         }
-        
+        uint64_t current_time = config_.system->millis();
+        uint64_t time_since_write = current_time - state.last_write_ms;
+
+        if (time_since_write > 10000) { // 10 seconds
+            HAP_LOG_WARN(config_.system, "[BleTransport] Rejecting GATT Read - >10s since write (Req #12)");
+            return {};
+        }
+
         HAP_LOG_INFO(config_.system, "[BleTransport] Handling GATT Read. Returning ", state.response_buffer.size(), " bytes");
         return state.response_buffer;
     }
@@ -701,7 +760,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         uint8_t status = 0x00;
         if (sig_response.empty()) {
              HAP_LOG_WARN(config_.system, "[BleTransport] Char Signature Read IID=", iid, " Not Found");
-             status = 0x05; // Invalid Request (Attribute Not Found)
+             status = 0x04; // Invalid Instance ID (Table 7-37)
         } else {
              HAP_LOG_INFO(config_.system, "[BleTransport] Char Signature Read IID=", iid, " Len=", sig_response.size());
              HAP_LOG(config_.system, "[BleTransport] Signature Response: ", to_hex_string(sig_response.data(), sig_response.size()));
@@ -737,10 +796,9 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                 value_bytes = {0x01, 0x01, 0x00};
                 HAP_LOG_INFO(config_.system, "[BleTransport] Pairing Features Read: returning 0x00");
             } else if (meta_it->char_type == 0x37) { // Version
-                // HAP Spec 7.4.4.5.2: Version characteristic returns protocol version string
-                // Format: "major.minor.revision" e.g., "1.1.0"
-                // Per HAP spec, current version for BLE is 1.1.0
-                std::string version = "1.1.0";
+                // HAP Spec 7.4.3.1: BLE protocol version string, "2.2.0" for
+                // this version of the spec (test requirement #3: must match).
+                std::string version = "2.2.0";
                 value_bytes.push_back(0x01); // TLV Type: HAP-Param-Value
                 value_bytes.push_back(static_cast<uint8_t>(version.size())); // Length
                 value_bytes.insert(value_bytes.end(), version.begin(), version.end()); // Value
@@ -764,7 +822,7 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                     value_bytes.insert(value_bytes.end(), raw_value.begin(), raw_value.end());
                 }
             } else {
-                status = 0x05; // Invalid Request (Attribute Not Found)
+                status = 0x04; // Invalid Instance ID (Table 7-37)
                 HAP_LOG_WARN(config_.system, "[BleTransport] Read IID=", iid, " Not Found");
             }
         }
@@ -781,13 +839,19 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         }
         if (meta_it) {
              uint8_t type = meta_it->char_type;
-             
+
              auto& session = session_manager_->get_or_create(connection_id);
+             // HAP 7.4.7.2: a new Pair Verify on an already-secured session
+             // must tear down the existing security session first.
+             if (type == 0x4E && session.context && session.context->is_encrypted()) {
+                 HAP_LOG_INFO(config_.system, "[BleTransport] New Pair Verify on secured session - tearing down old session");
+                 session.context = std::make_unique<ConnectionContext>(config_.crypto, config_.system, connection_id);
+             }
              if (!session.context) {
                 session.context = std::make_unique<ConnectionContext>(config_.crypto, config_.system, connection_id);
              }
              auto& ctx = *session.context;
-             
+
              // HAP-BLE Pair Setup/Verify are "Write-with-Response" (Spec 7.3.5.5)
              // The body is a LIST of TLVs:
              // - kTLVType_ReturnResponse (0x09): (Empty implies request response)
@@ -915,9 +979,9 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                      HAP_LOG_WARN(config_.system, "[BleTransport] Write IID=", iid, " - no value TLV found");
                      status = 0x06; // Invalid Request
                  }
-             } else {
-                 status = 0x05; // Not Found
-             }
+            } else {
+                status = 0x04; // Invalid Instance ID (Table 7-37)
+            }
         }
 
         send_response(connection_id, state.transaction_id, state.target_char_type, status, response_body);
@@ -932,20 +996,40 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
         }
     }
     else if (opcode == PDUOpcode::CharacteristicTimedWrite) {
+        // HAP 7.3.5.4: the body carries the Value TLV (0x01) and a TTL TLV
+        // (0x08, 1 byte, in 100ms units). The TTL timer starts when the
+        // timed-write response is delivered (i.e., on the controller's GATT
+        // read); the queued write is applied only if Execute-Write arrives
+        // before the deadline (test requirement #17).
+        auto write_tlvs = core::TLV8::parse(std::vector<uint8_t>(body.begin(), body.end()));
+        uint16_t ttl_ms = 3000; // Spec default when TTL TLV is absent
+        if (auto ttl_tlv = core::TLV8::find(write_tlvs, 0x08); ttl_tlv && !ttl_tlv->empty()) {
+            ttl_ms = static_cast<uint16_t>((*ttl_tlv)[0]) * 100;
+        }
+
         state.timed_write_body.assign(body.begin(), body.end());
         state.timed_write_iid = iid;
-        
-        HAP_LOG_INFO(config_.system, "[BleTransport] Timed Write stored for IID=", iid, " Body size=", body.size());
-        
+        state.timed_write_expiry_ms = config_.system->millis() + ttl_ms;
+
+        HAP_LOG_INFO(config_.system, "[BleTransport] Timed Write stored for IID=", iid, " Body size=", body.size(), " TTL=", ttl_ms, "ms");
+
         send_response(connection_id, state.transaction_id, state.target_char_type, 0x00, {});
     }
     else if (opcode == PDUOpcode::CharacteristicExecuteWrite) {
         uint8_t status = 0x00;
         std::vector<uint8_t> response_body;
-        
+
         if (state.timed_write_body.empty()) {
             HAP_LOG_WARN(config_.system, "[BleTransport] Execute Write with no pending timed write");
             status = 0x06; // Invalid Request
+        } else if (config_.system->millis() > state.timed_write_expiry_ms) {
+            // HAP 7.3.5.4: Execute-Write after TTL expiry must be ignored and
+            // answered with an error; the queued write is discarded.
+            HAP_LOG_WARN(config_.system, "[BleTransport] Execute Write after TTL expiry - discarding queued timed write");
+            status = 0x06; // Invalid Request
+            state.timed_write_body.clear();
+            state.timed_write_iid = 0;
+            state.timed_write_expiry_ms = 0;
         } else {
             HAP_LOG_INFO(config_.system, "[BleTransport] Executing pending timed write for IID=", state.timed_write_iid);
             
@@ -1049,14 +1133,15 @@ void BleTransport::process_transaction(uint16_t connection_id, TransactionState&
                     }
                 } else {
                     HAP_LOG_WARN(config_.system, "[BleTransport] Execute Timed Write IID=", state.timed_write_iid, " - characteristic not found");
-                    status = 0x05; // Not Found
+                    status = 0x04; // Invalid Instance ID (Table 7-37)
                 }
             }
             
             state.timed_write_body.clear();
             state.timed_write_iid = 0;
+            state.timed_write_expiry_ms = 0;
         }
-        
+
         send_response(connection_id, state.transaction_id, state.target_char_type, status, response_body);
     }
     else if (opcode == PDUOpcode::CharacteristicConfiguration) {
@@ -1235,7 +1320,13 @@ void BleTransport::send_response(uint16_t conn_id, uint16_t tid, uint16_t char_t
     } else {
         session_manager_->get_or_create(conn_id).transaction.response_buffer = packet;
     }
-    
+
+    auto& st = session_manager_->get_or_create(conn_id).transaction;
+    st.last_write_ms = config_.system->millis();
+    if (st.connection_established_ms == 0) {
+        st.connection_established_ms = config_.system->millis();
+    }
+
     // HAP-BLE Spec 7.3.5.1/7.3.5.5: The response is returned in the GATT Read Response.
 }
 
@@ -1466,7 +1557,7 @@ void BleTransport::register_services_by_type(uint16_t filter_type) {
                 
                 cdef.on_write = [this, char_type = static_cast<uint16_t>(ch->type() & 0xFFFF)](uint16_t conn_id, std::span<const uint8_t> data, bool response) {
                     (void)response;
-                    handle_hap_write_with_id(conn_id, char_type, data);
+                    handle_hap_write(conn_id, char_type, data);
                 };
                 
                 cdef.on_subscribe = [this, char_type = static_cast<uint16_t>(ch->type() & 0xFFFF)](uint16_t conn_id, bool enabled) {

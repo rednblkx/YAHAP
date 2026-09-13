@@ -41,11 +41,13 @@ public:
      * @param session_keys Tuple of (A2C key, C2A key)
      * @param shared_secret X25519 shared secret
      * @param controller_id Authenticated controller identifier
+     * @param admin Whether the controller holds the admin permission bit (HAP 5.10)
      */
     void upgrade_to_secure(
         std::tuple<std::array<uint8_t, 32>, std::array<uint8_t, 32>> session_keys,
         const std::array<uint8_t, 32>& shared_secret,
-        std::string controller_id);
+        std::string controller_id,
+        bool admin = true);
 
     /**
      * @brief Get session shared secret
@@ -53,7 +55,7 @@ public:
     const std::array<uint8_t, 32>& session_shared_secret() const { return session_shared_secret_; }
 
     const std::string& controller_id() const { return controller_id_; }
-    bool is_admin() const { return !controller_id_.empty(); } // Currently all paired controllers are admins
+    bool is_admin() const { return admin_; }
 
     void request_close() { should_close_ = true; }
     bool should_close() const { return should_close_; }
@@ -74,6 +76,7 @@ private:
     std::unique_ptr<SecureSession> secure_session_;
     bool rx_encrypted_ = false;
     std::string controller_id_;
+    bool admin_ = false;
     std::array<uint8_t, 32> session_shared_secret_ = {};
     bool should_close_ = false;
     
