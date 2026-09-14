@@ -7,6 +7,7 @@
  * translation unit (the builder is header-only for API convenience only).
  */
 #include "hap/types/ServiceTypes.hpp"
+#include "hap/core/HAPStatus.hpp"
 
 #include <cassert>
 
@@ -126,17 +127,25 @@ CharacteristicRef& CharacteristicRef::on_write_response_tlv(
            (characteristic_->format() == core::Format::TLV8 ||
             characteristic_->format() == core::Format::Data) &&
            "on_write_response_tlv on a non-TLV8/Data characteristic");
-    return on_write([cb = std::move(cb)](const core::Value& v) -> core::WriteResponse {
-        if (auto* d = std::get_if<std::vector<uint8_t>>(&v)) {
-            if (cb) {
-                auto response = cb(*d);
-                if (response && std::holds_alternative<core::HAPStatus>(*response)) {
-                    return std::get<core::HAPStatus>(*response);
+    if (characteristic_ && cb) {
+        // Must go through set_write_response_callback: the PUT /characteristics
+        // handler only sends the composed value when it comes from the
+        // write-response callback, not from the plain write callback.
+        characteristic_->set_write_response_callback(
+            [cb = std::move(cb)](const core::Value& v) -> core::HAPResponse<core::Value> {
+                const auto* d = std::get_if<std::vector<uint8_t>>(&v);
+                if (!d) {
+                    return core::HAPStatus::InvalidValueInRequest;
                 }
-            }
-        }
-        return std::nullopt;
-    });
+                if (auto response = cb(*d)) {
+                    return *response;
+                }
+                // No response composed: echo the written value, matching the
+                // no-callback fallback in the PUT /characteristics handler.
+                return v;
+            });
+    }
+    return *this;
 }
 
 } // namespace hap::service
