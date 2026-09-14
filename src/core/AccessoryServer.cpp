@@ -468,6 +468,14 @@ void AccessoryServer::factory_reset() {
         "[AccessoryServer] Factory reset complete - accessory is now unpaired");
 }
 
+void AccessoryServer::set_setup_code(const std::string& code) {
+    config_.setup_code = code;
+    HAP_LOG_INFO(config_.system, "[AccessoryServer] Setup code updated");
+    if (impl_->pairing_endpoints) {
+        impl_->pairing_endpoints->set_setup_code(code);
+    }
+}
+
 void AccessoryServer::tick() {
     if (scheduler_) {
         scheduler_->tick();

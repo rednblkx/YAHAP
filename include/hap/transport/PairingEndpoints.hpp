@@ -64,6 +64,15 @@ public:
     void set_accessory_id(const std::string& new_id);
 
     /**
+     * @brief Update the setup code used by subsequent Pair Setup sessions.
+     *
+     * Takes effect on the next SRP session (PairSetup derives a fresh verifier
+     * from config_.setup_code on every M1), so no in-flight session handling is
+     * needed beyond resetting sessions.
+     */
+    void set_setup_code(const std::string& new_code);
+
+    /**
      * @brief Reset all session state
      */
     void reset();

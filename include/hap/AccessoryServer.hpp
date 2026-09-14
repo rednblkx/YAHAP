@@ -109,6 +109,16 @@ public:
     void factory_reset();
 
     /**
+     * @brief Update the setup code used for future Pair Setup sessions.
+     *
+     * Intended for accessories that let the user pick a new code after
+     * provisioning (web UI etc.). Takes effect on the next Pair Setup; any
+     * in-flight pairing sessions are reset. Caller is responsible for
+     * validating the code format (8 digits) and strength.
+     */
+    void set_setup_code(const std::string& code);
+
+    /**
      * @brief Process periodic tasks. Call this regularly from your main loop.
      * 
      * Handles: session timeouts, GSN updates, characteristic change notifications.

@@ -374,6 +374,12 @@ void PairingEndpoints::set_accessory_id(const std::string& new_id) {
     HAP_LOG_INFO(config_.system, "[PairingEndpoints] Accessory ID updated to: ", new_id);
 }
 
+void PairingEndpoints::set_setup_code(const std::string& new_code) {
+    config_.setup_code = new_code;
+    HAP_LOG_INFO(config_.system, "[PairingEndpoints] Setup code updated");
+    reset();
+}
+
 void PairingEndpoints::reset() {
     // Clear all session state
     pair_setup_sessions_.clear();
