@@ -368,7 +368,26 @@ void AccessoryServer::update_mdns() {
     mdns_service.txt_records.push_back({"sf", sf_val}); // Status flags (1 = discoverable/unpaired, 0 = paired)
     mdns_service.txt_records.push_back({"ci", std::to_string(static_cast<uint16_t>(config_.category_id))}); // Category identifier
     mdns_service.txt_records.push_back({"ff", "0"}); // Feature flags
-    
+
+    // Setup hash: base64(first 4 bytes of SHA-512(SetupID + DeviceID)).
+    // iOS uses it to match a scanned X-HM:// QR code to this accessory; without
+    // it, "Add to Home" from a QR code fails immediately. Default Setup ID is
+    // "HSPN" (HomeSpan's default, and what the HomeKey web UI QR encodes).
+    {
+        std::string setup_id = "HSPN";
+        auto setup_id_bytes = config_.storage->get("setup_id");
+        if (setup_id_bytes && setup_id_bytes->size() == 4) {
+            setup_id.assign(setup_id_bytes->begin(), setup_id_bytes->end());
+        }
+        std::string input = setup_id + config_.accessory_id;
+        std::array<uint8_t, 64> digest{};
+        config_.crypto->sha512(
+            std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(input.data()), input.size()),
+            std::span<uint8_t, 64>(digest.data(), 64));
+        mdns_service.txt_records.push_back(
+            {"sh", hap::core::base64_encode(std::vector<uint8_t>(digest.begin(), digest.begin() + 4))});
+    }
+
     // Use update instead of re-register if already registered
     if (mdns_registered_) {
         config_.network->mdns_update_txt_record(mdns_service);
